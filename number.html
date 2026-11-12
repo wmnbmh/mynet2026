@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>数字融合 · 点击分裂 / 拖拽合成</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{
+    height:100%;margin:0;overflow:hidden;background:#04050b;color:#e9f3ff;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    -webkit-tap-highlight-color:transparent;user-select:none;
+  }
+  /* ---------- 背景 ---------- */
+  #bg{position:fixed;inset:0;z-index:0;overflow:hidden}
+  #bg::before,#bg::after{
+    content:"";position:absolute;width:75vmax;height:75vmax;border-radius:50%;filter:blur(30px);
+  }
+  #bg::before{
+    left:-30vmax;top:-35vmax;
+    background:radial-gradient(circle,rgba(0,140,255,.22),transparent 62%);
+    animation:d1 26s ease-in-out infinite alternate;
+  }
+  #bg::after{
+    right:-32vmax;bottom:-30vmax;
+    background:radial-gradient(circle,rgba(220,0,255,.18),transparent 62%);
+    animation:d2 34s ease-in-out infinite alternate;
+  }
+  @keyframes d1{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(9vmax,7vmax,0) scale(1.12)}}
+  @keyframes d2{from{transform:translate3d(0,0,0) scale(1.08)}to{transform:translate3d(-7vmax,-6vmax,0) scale(1)}}
+
+  #grid{
+    position:fixed;inset:0;z-index:0;pointer-events:none;
+    background-image:radial-gradient(rgba(120,180,255,.14) 1px,transparent 1px);
+    background-size:44px 44px;
+    -webkit-mask-image:radial-gradient(circle at 50% 45%,#000 0%,rgba(0,0,0,.35) 55%,transparent 82%);
+    mask-image:radial-gradient(circle at 50% 45%,#000 0%,rgba(0,0,0,.35) 55%,transparent 82%);
+  }
+
+  canvas{position:fixed;inset:0;z-index:1;display:block;touch-action:none;cursor:grab}
+  canvas.dragging{cursor:grabbing}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;z-index:3;pointer-events:none}
+  #topLeft{left:24px;top:20px}
+  #topLeft .label{font-size:10px;letter-spacing:.3em;color:rgba(150,195,255,.5);margin-bottom:4px}
+  #score{
+    font-size:40px;font-weight:800;line-height:.95;font-variant-numeric:tabular-nums;
+    text-shadow:0 0 28px rgba(70,170,255,.65),0 0 8px rgba(120,220,255,.5);
+  }
+  #combo{
+    font-size:13px;font-weight:800;letter-spacing:.1em;color:#79f0ff;height:20px;margin-top:6px;
+    text-shadow:0 0 16px rgba(0,240,255,.9);opacity:0;transition:opacity .2s;
+  }
+  #combo.on{opacity:1}
+
+  #topRight{right:20px;top:22px;display:flex;align-items:center;gap:18px}
+  .stat{text-align:right;font-size:10px;letter-spacing:.18em;color:rgba(150,195,255,.5)}
+  .stat b{
+    display:block;margin-top:3px;font-size:19px;font-weight:800;letter-spacing:0;
+    color:#dceaff;font-variant-numeric:tabular-nums;
+  }
+  #reset{
+    pointer-events:auto;cursor:pointer;border:1px solid rgba(120,190,255,.35);color:#cfe7ff;
+    background:rgba(30,70,130,.28);backdrop-filter:blur(8px);border-radius:12px;padding:9px 14px;
+    font-size:12px;letter-spacing:.12em;font-family:inherit;transition:.2s;
+  }
+  #reset:hover{background:rgba(50,120,210,.4);border-color:rgba(150,215,255,.7);box-shadow:0 0 20px rgba(80,170,255,.35)}
+  #reset:active{transform:scale(.96)}
+
+  #hint{
+    position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:3;pointer-events:none;
+    font-size:12.5px;letter-spacing:.14em;color:rgba(175,210,255,.55);white-space:nowrap;
+    padding:8px 16px;border-radius:99px;border:1px solid rgba(120,180,255,.14);
+    background:rgba(12,22,44,.35);backdrop-filter:blur(6px);
+    transition:opacity .8s,transform .8s;
+  }
+  #hint.hide{opacity:0;transform:translateX(-50%) translateY(12px)}
+
+  @media (max-width:560px){
+    #topLeft{left:16px;top:16px}
+    #score{font-size:30px}
+    #topRight{right:14px;top:16px;gap:12px}
+    .stat b{font-size:16px}
+    #reset{padding:7px 11px}
+    #hint{font-size:11px;letter-spacing:.05em;bottom:16px;padding:7px 12px}
+  }
+</style>
+</head>
+<body>
+
+<div id="bg"></div>
+<div id="grid"></div>
+<canvas id="game"></canvas>
+
+<div class="hud" id="topLeft">
+  <div class="label">S C O R E</div>
+  <div id="score">0</div>
+  <div id="combo"></div>
+</div>
+
+<div class="hud" id="topRight">
+  <div class="stat">最大数字<b id="maxv">8</b></div>
+  <div class="stat">方块数<b id="cnt">1</b></div>
+  <button id="reset">重来</button>
+</div>
+
+<div id="hint">点击方块分裂　·　拖动相同数字相撞合成</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const TAU  = Math.PI * 2;
+  const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif';
+
+  const canvas = document.getElementById('game');
+  const ctx    = canvas.getContext('2d');
+
+  const $score = document.getElementById('score');
+  const $combo = document.getElementById('combo');
+  const $max   = document.getElementById('maxv');
+  const $cnt   = document.getElementById('cnt');
+  const $hint  = document.getElementById('hint');
+  const $reset = document.getElementById('reset');
+
+  /* ================= 基础工具 ================= */
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const rand  = (a, b) => a + Math.random() * (b - a);
+
+  let W = 0, H = 0, DPR = 1, scale = 1;
+
+  /* ================= 状态 ================= */
+  let blocks = [], parts = [], rings = [], flashes = [], texts = [];
+  let score = 0, maxVal = 8, combo = 0, comboT = 0, lastMerge = -99;
+  let time = 0, spawnT = 0, shake = 0;
+  let drag = null;
+  let hudScore = -1, hudMax = -1, hudCnt = -1, hudCombo = -1;
+
+  const MAX_BLOCKS = 70;
+  const MAXV = 8192;
+  const FACE = 1.84;   // 方块边长 = 碰撞半径 * FACE
+  const TOUCH = 0.92;  // 碰撞判定系数
+
+  // 半径随数值（2 的幂）增长
+  const baseR = v => Math.min(17 + 8 * Math.log2(v), 110);
+  const rad   = v => baseR(v) * scale;
+  // 色相随等级变化，形成彩虹阶梯
+  const hueOf = v => ((Math.log2(v) * 42 + 188) % 360 + 360) % 360;
+
+  /* ================= 尺寸 ================= */
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width  = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    scale = clamp(Math.min(W, H) / 640, 0.62, 1.15);
+
+    for (const b of blocks) {
+      b.r = rad(b.value);
+      b.grad = b.glow = b.hg = null;
+      b.fs = 0;
+      b.x = clamp(b.x, b.r, W - b.r);
+      b.y = clamp(b.y, b.r, H - b.r);
+    }
+  }
+
+  /* ================= 方块 ================= */
+  function makeBlock(x, y, value) {
+    return {
+      x, y, vx: 0, vy: 0,
+      value,
+      r: rad(value),
+      hue: hueOf(value),
+      birth: time + 0.18,      // 保护期，避免刚分裂就立刻合体
+      pop: 1.5,                // 出现放大动画
+      seed: Math.random() * TAU,
+      shake: 0,                // 无法分裂时的抖动
+      dragged: false,
+      dead: false,
+      grad: null, glow: null, hg: null, fs: 0
+    };
+  }
+
+  function roundRectPath(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // 渐变按方块本地坐标创建一次并缓存
+  function prep(b) {
+    if (b.grad) return;
+    const s = b.r * FACE, h = b.hue;
+
+    const g = ctx.createLinearGradient(-s / 2, -s / 2, s / 2, s / 2);
+    g.addColorStop(0,    'hsl(' + h + ',96%,68%)');
+    g.addColorStop(0.45, 'hsl(' + h + ',92%,54%)');
+    g.addColorStop(1,    'hsl(' + ((h + 38) % 360) + ',88%,34%)');
+    b.grad = g;
+
+    const rg = ctx.createRadialGradient(0, 0, b.r * 0.15, 0, 0, b.r * 2.5);
+    rg.addColorStop(0,   'hsla(' + h + ',100%,64%,0.34)');
+    rg.addColorStop(0.5, 'hsla(' + h + ',100%,56%,0.11)');
+    rg.addColorStop(1,   'hsla(' + h + ',100%,50%,0)');
+    b.glow = rg;
+
+    const hg = ctx.createLinearGradient(0, -s / 2, 0, s * 0.1);
+    hg.addColorStop(0, 'rgba(255,255,255,.36)');
+    hg.addColorStop(1, 'rgba(255,255,255,0)');
+    b.hg = hg;
+  }
+
+  function calcFont(b, s) {
+    let fs = s * 0.56;
+    ctx.font = '800 ' + fs + 'px ' + FONT;
+    const w = ctx.measureText(String(b.value)).width;
+    const maxW = s * 0.76;
+    if (w > maxW) fs *= maxW / w;
+    return Math.max(9, fs);
+  }
+
+  function drawBlock(b) {
+    prep(b);
+    const s  = b.r * FACE;
+    const k  = b.pop * (1 + 0.014 * Math.sin(time * 2.3 + b.seed));
+    const sx = b.shake > 0 ? Math.sin(time * 78) * b.shake * 6 : 0;
+
+    ctx.save();
+    ctx.translate(b.x + sx, b.y);
+    ctx.scale(k, k);
+
+    // 外发光
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = b.glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, b.r * 2.5, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 方块主体
+    roundRectPath(-s / 2, -s / 2, s, s, s * 0.27);
+    ctx.fillStyle = b.grad;
+    ctx.fill();
+
+    // 亮边
+    ctx.lineWidth = Math.max(1.4, s * 0.035);
+    ctx.strokeStyle = 'hsla(' + b.hue + ',100%,88%,.8)';
+    ctx.stroke();
+
+    // 玻璃高光
+    roundRectPath(-s / 2 + s * 0.1, -s / 2 + s * 0.1, s * 0.8, s * 0.4, s * 0.2);
+    ctx.fillStyle = b.hg;
+    ctx.fill();
+
+    // 数字
+    if (!b.fs) b.fs = calcFont(b, s);
+    ctx.font = '800 ' + b.fs + 'px ' + FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'hsla(' + b.hue + ',100%,70%,.95)';
+    ctx.shadowBlur = s * 0.2;
+    ctx.fillStyle = 'rgba(255,255,255,.98)';
+    ctx.fillText(String(b.value), 0, s * 0.03);
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
+  /* ================= 粒子 / 光环 / 文字 ================= */
+  function burst(x, y, hue, count, power, size) {
+    for (let i = 0; i < count; i++) {
+      const a  = Math.random() * TAU;
+      const sp = power * (0.2 + Math.random() * 0.95);
+      parts.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0,
+        max: 0.45 + Math.random() * 0.75,
+        size: size * (0.5 + Math.random() * 1.1),
+        hue: hue + rand(-32, 32)
+      });
+    }
+    if (parts.length > 1100) parts.splice(0, parts.length - 1100);
+  }
+
+  function puff(b, mul) {
+    burst(b.x, b.y, b.hue, Math.round(12 * (mul || 1)), 130, 1.8);
+    rings.push({
+      x: b.x, y: b.y,
+      r0: b.r * 0.85, r1: b.r * 1.9,
+      life: 0, max: 0.38, hue: b.hue,
+      lw: Math.max(1.5, b.r * 0.06)
+    });
+  }
+
+  /* ================= 分裂 ================= */
+  function splitBlock(b) {
+    if (b.dead) return;
+
+    if (b.value < 2) {           // 1 无法再分裂
+      b.shake = 1;
+      puff(b, 0.7);
+      return;
+    }
+    if (blocks.length >= MAX_BLOCKS) {
+      b.shake = 1;
+      texts.push({ x: b.x, y: b.y - b.r * 0.9, text: '太挤啦', life: 0, max: 0.9, size: 14, hue: b.hue });
+      return;
+    }
+
+    const half = b.value / 2;
+    const ang  = rand(0, TAU);
+    const cr   = rad(half);
+    const d    = cr * 1.02;
+
+    for (const sgn of [-1, 1]) {
+      const nx = Math.cos(ang) * sgn;
+      const ny = Math.sin(ang) * sgn;
+      const nb = makeBlock(
+        clamp(b.x + nx * d, cr, W - cr),
+        clamp(b.y + ny * d, cr, H - cr),
+        half
+      );
+      nb.vx = b.vx + nx * 170;
+      nb.vy = b.vy + ny * 170;
+      nb.pop = 1.8;
+      blocks.push(nb);
+    }
+
+    b.dead = true;
+    puff(b, 1.5);
+  }
+
+  /* ================= 合成 ================= */
+  function canMerge(a, b) {
+    return time > a.birth && time > b.birth;
+  }
+
+  function mergeBlocks(a, b) {
+    const value = a.value + b.value;
+    const x = (a.x + b.x) / 2;
+    const y = (a.y + b.y) / 2;
+
+    a.dead = b.dead = true;
+    if (drag && (drag.b === a || drag.b === b)) {
+      drag.b.dragged = false;
+      drag = null;
+      canvas.classList.remove('dragging');
+    }
+
+    const nb = makeBlock(x, y, value);
+    nb.vx = (a.vx + b.vx) * 0.5;
+    nb.vy = (a.vy + b.vy) * 0.5;
+    nb.pop = 1.9;
+    blocks.push(nb);
+
+    // 连击
+    if (time - lastMerge < 1.15) combo++; else combo = 1;
+    lastMerge = time;
+    comboT = 1.4;
+
+    const pts = Math.round(value * combo);
+    score += pts;
+    if (value > maxVal) maxVal = value;
+
+    const t   = Math.log2(value);
+    const cnt = Math.min(120, Math.round(24 + t * 9));
+
+    burst(x, y, nb.hue, cnt, 150 + t * 30, 2.2 + Math.min(t, 9) * 0.55);
+    burst(x, y, (nb.hue + 150) % 360, Math.round(cnt * 0.35), 320, 1.4);
+
+    rings.push({ x, y, r0: nb.r * 0.7, r1: nb.r * 4.0, life: 0, max: 0.70,
+                 hue: nb.hue, lw: Math.max(2, nb.r * 0.14) });
+    rings.push({ x, y, r0: nb.r * 0.4, r1: nb.r * 2.4, life: 0, max: 0.42,
+                 hue: (nb.hue + 70) % 360, lw: Math.max(1.5, nb.r * 0.07) });
+
+    flashes.push({ x, y, r: nb.r * 3, life: 0, max: 0.5, hue: nb.hue });
+
+    texts.push({ x, y: y - nb.r * 0.5, text: '+' + pts, life: 0, max: 0.95,
+                 size: Math.max(15, nb.r * 0.52), hue: nb.hue });
+    if (combo > 1) {
+      texts.push({ x, y: y + nb.r * 0.55, text: '连击 ×' + combo, life: 0, max: 1.15,
+                   size: Math.max(12, nb.r * 0.36), hue: (nb.hue + 50) % 360 });
+    }
+
+    shake = Math.min(16, shake + 1 + t * 0.55);
+  }
+
+  /* ================= 自动补充 ================= */
+  function trySpawn() {
+    if (blocks.length >= MAX_BLOCKS - 6) return;
+    const value = Math.random() < 0.75 ? 1 : 2;
+    const r = rad(value);
+
+    for (let k = 0; k < 40; k++) {
+      const x = rand(W * 0.12, W * 0.88);
+      const y = rand(H * 0.12, H * 0.88);
+      let ok = true;
+      for (const b of blocks) {
+        const dx = b.x - x, dy = b.y - y;
+        const m = b.r + r + 18;
+        if (dx * dx + dy * dy < m * m) { ok = false; break; }
+      }
+      if (!ok) continue;
+
+      const nb = makeBlock(x, y, value);
+      const a  = rand(0, TAU);
+      nb.vx = Math.cos(a) * 50;
+      nb.vy = Math.sin(a) * 50;
+      nb.pop = 1.6;
+      blocks.push(nb);
+      burst(x, y, nb.hue, 12, 90, 1.6);
+      return;
+    }
+  }
+
+  /* ================= 碰撞 ================= */
+  function collide() {
+    for (let i = 0; i < blocks.length; i++) {
+      const a = blocks[i];
+      if (a.dead) continue;
+
+      for (let j = i + 1; j < blocks.length; j++) {
+        const b = blocks[j];
+        if (b.dead) continue;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const rr = (a.r + b.r) * TOUCH;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= rr * rr) continue;
+
+        // 相同数字 → 合成（每帧最多一次，形成连锁爆发感）
+        if (a.value === b.value && a.value * 2 <= MAXV && canMerge(a, b)) {
+          mergeBlocks(a, b);
+          return;
+        }
+
+        if (d2 < 0.0001) { b.x += 0.6; continue; }
+
+        const d  = Math.sqrt(d2);
+        const nx = dx / d, ny = dy / d;
+        const overlap = rr - d;
+
+        const aLock = a.dragged, bLock = b.dragged;
+        const aS = aLock ? 0 : (bLock ? 1 : 0.5);
+        const bS = bLock ? 0 : (aLock ? 1 : 0.5);
+
+        a.x -= nx * overlap * aS;
+        a.y -= ny * overlap * aS;
+        b.x += nx * overlap * bS;
+        b.y += ny * overlap * bS;
+
+        // 弹开
+        const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+        if (vn < 0) {
+          const imp = -(1 + 0.85) * vn / 2;
+          if (!aLock) { a.vx -= imp * nx; a.vy -= imp * ny; }
+          if (!bLock) { b.vx += imp * nx; b.vy += imp * ny; }
+        }
+
+        a.x = clamp(a.x, a.r, W - a.r);
+        a.y = clamp(a.y, a.r, H - a.r);
+        b.x = clamp(b.x, b.r, W - b.r);
+        b.y = clamp(b.y, b.r, H - b.r);
+      }
+    }
+  }
+
+  /* ================= 更新 ================= */
+  function update(dt) {
+    time += dt;
+
+    spawnT += dt;
+    if (spawnT > 2.6) { spawnT = 0; trySpawn(); }
+
+    for (const b of blocks) {
+      if (b.dead) continue;
+
+      if (b.pop > 1.0001) b.pop += (1 - b.pop) * Math.min(1, dt * 11);
+      else b.pop = 1;
+
+      if (b.shake > 0) b.shake = Math.max(0, b.shake - dt * 2.4);
+      if (b.dragged) continue;
+
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+
+      const damp = Math.pow(0.5, dt);
+      b.vx *= damp;
+      b.vy *= damp;
+
+      const m = b.r;
+      if (b.x < m)        { b.x = m;        if (b.vx < 0) b.vx = -b.vx * 0.75; }
+      else if (b.x > W - m) { b.x = W - m;  if (b.vx > 0) b.vx = -b.vx * 0.75; }
+      if (b.y < m)        { b.y = m;        if (b.vy < 0) b.vy = -b.vy * 0.75; }
+      else if (b.y > H - m) { b.y = H - m;  if (b.vy > 0) b.vy = -b.vy * 0.75; }
+    }
+
+    collide();
+
+    if (blocks.length && blocks.indexOf(null) === -1) {
+      blocks = blocks.filter(b => !b.dead);
+    }
+
+    updateEffects(dt);
+  }
+
+  function updateEffects(dt) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.life += dt;
+      if (p.life >= p.max) { parts.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const d = Math.pow(0.16, dt);
+      p.vx *= d;
+      p.vy *= d;
+    }
+    for (let i = rings.length - 1; i >= 0; i--) {
+      rings[i].life += dt;
+      if (rings[i].life >= rings[i].max) rings.splice(i, 1);
+    }
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      flashes[i].life += dt;
+      if (flashes[i].life >= flashes[i].max) flashes.splice(i, 1);
+    }
+    for (let i = texts.length - 1; i >= 0; i--) {
+      texts[i].life += dt;
+      if (texts[i].life >= texts[i].max) texts.splice(i, 1);
+    }
+
+    if (comboT > 0) { comboT -= dt; if (comboT <= 0) combo = 0; }
+    if (shake > 0)  { shake = Math.max(0, shake - dt * 40); }
+  }
+
+  /* ================= 渲染 ================= */
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+
+    if (shake > 0.3) {
+      ctx.translate(rand(-shake, shake) * 0.45, rand(-shake, shake) * 0.45);
+    }
+
+    // 方块
+    for (const b of blocks) {
+      if (!b.dead) drawBlock(b);
+    }
+
+    // 爆炸闪光
+    if (flashes.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (const f of flashes) {
+        const k  = 1 - f.life / f.max;
+        const rr = f.r * (0.7 + 0.5 * (1 - k));
+        const g  = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, rr);
+        g.addColorStop(0,   'rgba(255,255,255,' + (0.5 * k) + ')');
+        g.addColorStop(0.4, 'hsla(' + f.hue + ',100%,72%,' + (0.28 * k) + ')');
+        g.addColorStop(1,   'hsla(' + f.hue + ',100%,60%,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, rr, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // 冲击波光环
+    if (rings.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (const r of rings) {
+        const k  = r.life / r.max;
+        const e  = 1 - Math.pow(1 - k, 2.4);
+        const rr = r.r0 + (r.r1 - r.r0) * e;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, rr, 0, TAU);
+        ctx.lineWidth = Math.max(0.6, r.lw * (1 - k * 0.8));
+        ctx.strokeStyle = 'hsla(' + r.hue + ',100%,78%,' + ((1 - k) * 0.85) + ')';
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // 粒子
+    if (parts.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (const p of parts) {
+        const k  = 1 - p.life / p.max;
+        const rr = p.size * (0.35 + 0.95 * k);
+        ctx.fillStyle = 'hsla(' + p.hue + ',100%,68%,' + (k * 0.9) + ')';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rr, 0, TAU);
+        ctx.fill();
+
+        if (rr > 1.4) {   // 外层柔光，廉价 bloom
+          ctx.fillStyle = 'hsla(' + p.hue + ',100%,64%,' + (k * 0.13) + ')';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, rr * 3.4, 0, TAU);
+          ctx.fill();
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // 浮动文字
+    for (const t of texts) {
+      const k = 1 - t.life / t.max;
+      const y = t.y - (t.life / t.max) * 52;
+      ctx.font = '800 ' + t.size + 'px ' + FONT;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'hsla(' + t.hue + ',100%,60%,' + k + ')';
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = 'hsla(' + t.hue + ',100%,88%,' + k + ')';
+      ctx.fillText(t.text, t.x, y);
+    }
+    ctx.shadowBlur = 0;
+
+    ctx.restore();
+  }
+
+  /* ================= HUD ================= */
+  function updateHUD() {
+    if (score !== hudScore) { hudScore = score; $score.textContent = score; }
+    if (maxVal !== hudMax)  { hudMax = maxVal;   $max.textContent = maxVal; }
+
+    const c = blocks.length;
+    if (c !== hudCnt) { hudCnt = c; $cnt.textContent = c; }
+
+    const cc = combo > 1 ? combo : 0;
+    if (cc !== hudCombo) {
+      hudCombo = cc;
+      if (cc) { $combo.textContent = '连击 ×' + cc; $combo.classList.add('on'); }
+      else    { $combo.classList.remove('on'); }
+    }
+  }
+
+  /* ================= 输入 ================= */
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function pick(x, y) {
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.dead) continue;
+      const rr = b.r * 1.02;
+      const dx = x - b.x, dy = y - b.y;
+      if (dx * dx + dy * dy <= rr * rr) return b;
+    }
+    return null;
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const p = pos(e);
+    const b = pick(p.x, p.y);
+    hideHint();
+    if (!b) return;
+
+    // 置顶
+    const i = blocks.indexOf(b);
+    if (i >= 0) { blocks.splice(i, 1); blocks.push(b); }
+
+    drag = {
+      b,
+      ox: p.x - b.x,
+      oy: p.y - b.y,
+      sx: p.x,
+      sy: p.y,
+      t0: performance.now(),
+      lt: performance.now(),
+      moved: false
+    };
+    b.dragged = true;
+    canvas.classList.add('dragging');
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const p = pos(e);
+    const b = drag.b;
+
+    if (Math.hypot(p.x - drag.sx, p.y - drag.sy) > 8) drag.moved = true;
+
+    const nx = clamp(p.x - drag.ox, b.r, W - b.r);
+    const ny = clamp(p.y - drag.oy, b.r, H - b.r);
+
+    const t  = performance.now();
+    const dt = Math.max(0.008, (t - drag.lt) / 1000);
+    b.vx = clamp((nx - b.x) / dt * 0.5, -2400, 2400);
+    b.vy = clamp((ny - b.y) / dt * 0.5, -2400, 2400);
+    b.x = nx;
+    b.y = ny;
+    drag.lt = t;
+  });
+
+  function endDrag() {
+    if (!drag) return;
+    const b  = drag.b;
+    const dt = performance.now() - drag.t0;
+    const moved = drag.moved;
+
+    b.dragged = false;
+    drag = null;
+    canvas.classList.remove('dragging');
+
+    if (!moved && dt < 500) {   // 视为「点击」
+      b.vx *= 0.2;
+      b.vy *= 0.2;
+      splitBlock(b);
+    }
+  }
+
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  window.addEventListener('blur', () => {
+    if (drag) {
+      drag.b.dragged = false;
+      drag = null;
+      canvas.classList.remove('dragging');
+    }
+  });
+
+  let hintHidden = false;
+  function hideHint() {
+    if (hintHidden) return;
+    hintHidden = true;
+    $hint.classList.add('hide');
+  }
+
+  /* ================= 重置 ================= */
+  function reset() {
+    blocks = []; parts = []; rings = []; flashes = []; texts = [];
+    score = 0; maxVal = 8; combo = 0; comboT = 0; lastMerge = -99;
+    time = 0; spawnT = 0; shake = 0; drag = null;
+    canvas.classList.remove('dragging');
+
+    const b = makeBlock(W / 2, H / 2, 8);
+    b.pop = 2.4;
+    blocks.push(b);
+
+    burst(W / 2, H / 2, b.hue, 42, 230, 2.6);
+    rings.push({ x: W / 2, y: H / 2, r0: b.r * 0.6, r1: b.r * 4, life: 0, max: 0.8, hue: b.hue, lw: 5 });
+
+    hudScore = hudMax = hudCnt = hudCombo = -1;
+    updateHUD();
+  }
+
+  $reset.addEventListener('click', e => { e.stopPropagation(); reset(); });
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+  setTimeout(hideHint, 12000);
+
+  /* ================= 主循环 ================= */
+  let lastT = performance.now();
+
+  function frame(now) {
+    let dt = (now - lastT) / 1000;
+    lastT = now;
+    if (dt > 1 / 30) dt = 1 / 30;   // 防止切后台后跳帧
+    if (dt < 0) dt = 0;
+
+    update(dt);
+    render();
+    updateHUD();
+    requestAnimationFrame(frame);
+  }
+
+  /* ================= 启动 ================= */
+  resize();
+  reset();
+  requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
