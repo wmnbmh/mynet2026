@@ -231,7 +231,6 @@
   }
   .notice button:hover{background:rgba(255,181,69,.28);}
 
-  /* 卡片容器 */
   .grid{
     display:flex;
     flex-wrap:wrap;
@@ -661,12 +660,7 @@
 
     .divider{margin:22px 0 26px;width:min(100%,420px);}
 
-    .notice{
-      font-size:12px;
-      padding:10px 13px;
-      margin-bottom:18px;
-      border-radius:10px;
-    }
+    .notice{font-size:12px;padding:10px 13px;margin-bottom:18px;border-radius:10px;}
 
     .grid{
       flex-direction:column;
@@ -694,12 +688,7 @@
     .state{padding:28px 18px;}
     .state p{font-size:12.5px;}
 
-    footer{
-      margin-top:34px;
-      font-size:10.5px;
-      letter-spacing:.12em;
-      padding-bottom:4px;
-    }
+    footer{margin-top:34px;font-size:10.5px;letter-spacing:.12em;padding-bottom:4px;}
 
     .modal{padding:24px 20px 20px;border-radius:16px;}
     .modal-actions{flex-direction:column-reverse;}
@@ -792,19 +781,19 @@
 
   /* ========== 配置区 ========== */
 
-  /* 依次尝试的 API 地址：优先用 Pages 域名里的用户名 wnmbmh，其次尝试你写的 wmnmhm */
   var API_CANDIDATES = [
     'https://api.github.com/repos/wnmbmh/mynet2026/contents/?ref=main',
     'https://api.github.com/repos/wmnmhm/mynet2026/contents/?ref=main'
   ];
 
-  /* 兜底数据：接口完全不可用时，仍然显示这些游戏 */
+  /* 兜底数据：接口不可用时显示这一份（tag 可自定义，不写则默认 CACHED） */
   var FALLBACK_GAMES = [
     { name: '数字融合',   url: 'number.html',            desc: '点击分裂，拖拽合成' },
     { name: '打砖块',     url: 'breakout.html',          desc: '移动鼠标接球，打碎所有砖块' },
     { name: '极限拉扯',   url: 'ExtremeTension.html',    desc: '按住史莱姆，疯狂揉捏拉扯' },
     { name: '赛博龙卷风', url: 'tornado.html',           desc: '拖动龙卷风，卷碎掉落物' },
-    { name: '黑洞涂鸦',   url: 'blackholegraffiti.html', desc: '手指随意涂鸦，看线条被引力吞噬' }
+    { name: '黑洞涂鸦',   url: 'blackholegraffiti.html', desc: '手指随意涂鸦，看线条被引力吞噬' },
+    { name: '空间破碎',   url: 'fangkuai.html',          desc: '点击进入 · fangkuai.html', tag: 'BREAK' }
   ];
 
   var LS_KEY  = 'gamehub:customGames:v1';
@@ -820,9 +809,9 @@
   var modalErr = document.getElementById('modalErr');
 
   /* ========== 状态 ========== */
-  var repoGames  = [];     // 当前展示的仓库/兜底游戏
-  var dataSource = '';     // 'api' | 'fallback' | ''
-  var noticeText = '';     // 非阻塞提示文案
+  var repoGames  = [];
+  var dataSource = '';
+  var noticeText = '';
 
   /* ========== 工具 ========== */
   function esc(str){
@@ -846,10 +835,6 @@
     try{ localStorage.setItem(LS_KEY, JSON.stringify(list)); }catch(e){}
   }
 
-  function isAbsolute(url){
-    return /^(https?:)?\/\//i.test(url) || /^(mailto|tel):/i.test(url);
-  }
-
   function errText(err){
     var msg = err && err.message;
     if(err && err.name === 'AbortError') return '请求超时，网络可能较慢。';
@@ -867,7 +852,7 @@
     if(num.length < 2) num = '0' + num;
 
     var isCustom = game.source === 'custom';
-    var tag = isCustom ? 'CUSTOM' : (game.source === 'fallback' ? 'CACHED' : 'HTML');
+    var tag = game.tag || (isCustom ? 'CUSTOM' : (game.source === 'fallback' ? 'CACHED' : 'HTML'));
     var delay = (0.18 + Math.min(index, 8) * 0.07).toFixed(2);
 
     return '' +
@@ -876,7 +861,7 @@
           ' style="animation-delay:' + delay + 's">' +
           '<div class="card-top">' +
             '<span class="idx">' + num + '</span>' +
-            '<span class="tag">' + tag + '</span>' +
+            '<span class="tag">' + esc(tag) + '</span>' +
           '</div>' +
           '<h2>' + esc(game.name) + '</h2>' +
           '<p class="desc">' + esc(game.desc) + '</p>' +
@@ -892,7 +877,6 @@
   }
 
   function render(){
-    /* 自定义游戏去重：和已有列表链接相同的就不再重复显示 */
     var seen = {};
     repoGames.forEach(function(g){
       seen[String(g.url).toLowerCase()] = true;
@@ -917,7 +901,6 @@
       subtitle.textContent = '已加载 ' + total + ' 款游戏 · 选择你的战场';
     }
 
-    /* 非阻塞提示条 */
     if(noticeText){
       notice.className = 'notice show';
       notice.innerHTML =
@@ -998,7 +981,7 @@
 
   function useFallback(reason){
     repoGames = FALLBACK_GAMES.map(function(g){
-      return { name: g.name, url: g.url, desc: g.desc, source: 'fallback' };
+      return { name: g.name, url: g.url, desc: g.desc, tag: g.tag, source: 'fallback' };
     });
     dataSource = 'fallback';
     noticeText = reason;
@@ -1031,7 +1014,7 @@
         render();
       }).catch(function(err){
         lastError = err;
-        tryNext();   // 换下一个候选地址再试
+        tryNext();
       });
     }
 
