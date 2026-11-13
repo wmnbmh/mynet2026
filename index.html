@@ -173,42 +173,6 @@
     box-shadow:0 0 12px var(--cyan);
   }
 
-  /* 非阻塞提示条 */
-  .notice{
-    display:none;
-    width:100%;
-    max-width:760px;
-    margin:0 0 24px;
-    padding:11px 16px;
-    gap:10px;
-    align-items:center;
-    justify-content:center;
-    flex-wrap:wrap;
-    border-radius:12px;
-    background:rgba(255,181,69,.08);
-    border:1px solid rgba(255,181,69,.32);
-    color:#ffcf8a;
-    font-size:12.5px;
-    line-height:1.6;
-    letter-spacing:.04em;
-    text-align:center;
-  }
-  .notice.show{display:flex;}
-  .notice button{
-    font-family:"SFMono-Regular",Consolas,monospace;
-    font-size:11.5px;
-    letter-spacing:.14em;
-    padding:6px 14px;
-    border-radius:999px;
-    color:#ffcf8a;
-    background:rgba(255,181,69,.14);
-    border:1px solid rgba(255,181,69,.45);
-    cursor:pointer;
-    transition:background .25s;
-    white-space:nowrap;
-  }
-  .notice button:hover{background:rgba(255,181,69,.28);}
-
   /* 卡片容器 */
   .grid{
     display:flex;
@@ -497,8 +461,6 @@
 
     .divider{margin:22px 0 26px;width:min(100%,420px);}
 
-    .notice{font-size:12px;padding:10px 13px;margin-bottom:18px;border-radius:10px;}
-
     .grid{
       flex-direction:column;
       flex-wrap:nowrap;
@@ -577,8 +539,6 @@
 
     <div class="divider"></div>
 
-    <div class="notice" id="notice"></div>
-
     <main class="grid" id="grid">
       <div class="skeleton"></div>
       <div class="skeleton"></div>
@@ -596,12 +556,17 @@
 
   /* ========== 配置区 ========== */
 
+  /* 依次尝试的 API 地址（都带 ?ref=main） */
   var API_CANDIDATES = [
     'https://api.github.com/repos/wnmbmh/mynet2026/contents/?ref=main',
     'https://api.github.com/repos/wmnmhm/mynet2026/contents/?ref=main'
   ];
 
-  /* 兜底数据：接口不可用时显示这一份（tag 不写则默认 CACHED） */
+  /* 缓存：sessionStorage + 30 分钟有效期 */
+  var CACHE_KEY = 'gamehub:repoCache:v1';
+  var CACHE_TTL = 30 * 60 * 1000;
+
+  /* 静态兜底：缓存过期 + 请求失败时使用（tag 不写则默认 CACHED） */
   var FALLBACK_GAMES = [
     { name: '数字融合',   url: 'number.html',            desc: '点击分裂，拖拽合成' },
     { name: '打砖块',     url: 'breakout.html',          desc: '移动鼠标接球，打碎所有砖块' },
@@ -616,12 +581,10 @@
   /* ========== 元素 ========== */
   var grid     = document.getElementById('grid');
   var subtitle = document.getElementById('subtitle');
-  var notice   = document.getElementById('notice');
 
   /* ========== 状态 ========== */
   var repoGames  = [];
-  var dataSource = '';
-  var noticeText = '';
+  var dataSource = '';   // 'cache' | 'api' | 'fallback'
 
   /* ========== 工具 ========== */
   function esc(str){
@@ -630,14 +593,38 @@
     });
   }
 
-  function errText(err){
-    var msg = err && err.message;
-    if(err && err.name === 'AbortError') return '请求超时，网络可能较慢。';
-    if(msg === 'RATE')    return 'GitHub 接口访问次数已达上限（未登录每小时 60 次），请稍后再试。';
-    if(msg === 'NOTFOUND')return '未找到仓库目录（404），请确认仓库名与分支是 main。';
-    if(msg === 'FORMAT')  return '接口返回的数据格式异常。';
-    if(/^HTTP/.test(msg || '')) return '服务器返回异常（' + msg + '）。';
-    return '网络请求失败，可能是断网或浏览器插件拦截。';
+  function isValidGame(g){
+    return g && typeof g.name === 'string' && typeof g.url === 'string' && g.name && g.url;
+  }
+
+  /* ========== 缓存读写 ========== */
+  function readCache(){
+    try{
+      var raw = sessionStorage.getItem(CACHE_KEY);
+      if(!raw) return null;
+
+      var obj = JSON.parse(raw);
+      if(!obj || typeof obj.ts !== 'number' || !Array.isArray(obj.games)) return null;
+
+      /* 超过 30 分钟视为过期 */
+      if(Date.now() - obj.ts > CACHE_TTL) return null;
+
+      var games = obj.games.filter(isValidGame);
+      return games.length ? games : null;
+    }catch(e){
+      return null;
+    }
+  }
+
+  function writeCache(games){
+    try{
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({
+        ts: Date.now(),
+        games: games
+      }));
+    }catch(e){
+      /* 隐私模式或空间不足：忽略即可，不影响页面 */
+    }
   }
 
   /* ========== 渲染 ========== */
@@ -669,20 +656,12 @@
 
     if(!total){
       subtitle.textContent = '暂无游戏';
+    }else if(dataSource === 'cache'){
+      subtitle.textContent = '已加载 ' + total + ' 款游戏 · 本地缓存';
     }else if(dataSource === 'fallback'){
-      subtitle.textContent = '已加载 ' + total + ' 款游戏 · 内置备用列表';
+      subtitle.textContent = '已加载 ' + total + ' 款游戏 · 离线备用';
     }else{
       subtitle.textContent = '已加载 ' + total + ' 款游戏 · 选择你的战场';
-    }
-
-    if(noticeText){
-      notice.className = 'notice show';
-      notice.innerHTML =
-        '<span>⚠ ' + esc(noticeText) + ' 当前显示内置备用游戏，功能不受影响。</span>' +
-        '<button type="button" id="btnRetry">重新扫描</button>';
-    }else{
-      notice.className = 'notice';
-      notice.innerHTML = '';
     }
 
     var html = '';
@@ -749,29 +728,43 @@
     });
   }
 
-  function useFallback(reason){
-    repoGames = FALLBACK_GAMES.map(function(g){
-      return { name: g.name, url: g.url, desc: g.desc, tag: g.tag, source: 'fallback' };
-    });
-    dataSource = 'fallback';
-    noticeText = reason;
-    render();
-  }
-
-  function loadRepo(){
-    var i = 0;
-    var lastError = null;
-
-    noticeText = '';
-    dataSource = '';
+  function showSkeleton(){
     grid.innerHTML =
       '<div class="skeleton"></div><div class="skeleton"></div>' +
       '<div class="skeleton"></div><div class="skeleton"></div>';
     subtitle.textContent = '正在扫描仓库…';
+  }
+
+  function useFallback(){
+    repoGames = FALLBACK_GAMES.map(function(g){
+      return { name: g.name, url: g.url, desc: g.desc, tag: g.tag, source: 'fallback' };
+    });
+    dataSource = 'fallback';
+    render();
+  }
+
+  /* ========== 主流程 ========== */
+  function loadGames(){
+    /* 1. 先看缓存：30 分钟内命中就直接渲染，一个请求都不发 */
+    var cached = readCache();
+    if(cached){
+      repoGames = cached.map(function(g){
+        return { name: g.name, url: g.url, desc: g.desc, tag: g.tag, source: 'repo' };
+      });
+      dataSource = 'cache';
+      render();
+      return;
+    }
+
+    /* 2. 缓存缺失/过期：才去请求 API */
+    showSkeleton();
+
+    var i = 0;
 
     function tryNext(){
       if(i >= API_CANDIDATES.length){
-        useFallback(errText(lastError));
+        /* 3. 全部失败：静态兜底，页面永不白屏 */
+        useFallback();
         return;
       }
 
@@ -780,10 +773,16 @@
       fetchJSON(url).then(function(data){
         repoGames = parseContents(data);
         dataSource = 'api';
-        noticeText = '';
+
+        /* 只有拿到有效结果才写缓存，避免把空列表/失败状态存 30 分钟 */
+        if(repoGames.length){
+          writeCache(repoGames.map(function(g){
+            return { name: g.name, url: g.url, desc: g.desc, tag: g.tag };
+          }));
+        }
+
         render();
-      }).catch(function(err){
-        lastError = err;
+      }).catch(function(){
         tryNext();
       });
     }
@@ -791,13 +790,8 @@
     tryNext();
   }
 
-  /* ========== 事件 ========== */
-  notice.addEventListener('click', function(e){
-    if(e.target.closest('#btnRetry')) loadRepo();
-  });
-
   /* ========== 启动 ========== */
-  loadRepo();
+  loadGames();
 })();
 </script>
 
