@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#05070e">
 <title>我的游戏库</title>
 <style>
   :root{
@@ -11,11 +12,18 @@
     --violet:#a78bfa;
     --text:#e7f2ff;
     --muted:#7c8db5;
+    --safe-top:env(safe-area-inset-top,0px);
+    --safe-bottom:env(safe-area-inset-bottom,0px);
   }
 
   *{margin:0;padding:0;box-sizing:border-box;}
 
-  html,body{height:100%;}
+  /* 关键：不再给 html/body 设固定高度，避免变成固定高滚动容器 */
+  html{
+    -webkit-text-size-adjust:100%;
+    text-size-adjust:100%;
+    overflow-x:hidden;
+  }
 
   body{
     background:var(--bg);
@@ -24,11 +32,17 @@
     display:flex;
     flex-direction:column;
     align-items:center;
-    justify-content:center;
-    padding:48px 24px;
+    /* 顶端安全距离：状态栏 + 呼吸留白 */
+    padding-top:calc(var(--safe-top) + 48px);
+    padding-bottom:calc(var(--safe-bottom) + 48px);
+    padding-left:24px;
+    padding-right:24px;
     min-height:100vh;
+    min-height:100svh;       /* 移动端稳定视口高度，避免地址栏抖动 */
     overflow-x:hidden;
     position:relative;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
   }
 
   /* 科技网格背景 */
@@ -57,11 +71,13 @@
   }
   .orb-1{
     width:520px;height:520px;
+    max-width:90vw;max-height:90vw;
     background:rgba(0,240,255,.16);
     top:-140px;left:-120px;
   }
   .orb-2{
     width:460px;height:460px;
+    max-width:80vw;max-height:80vw;
     background:rgba(139,92,246,.18);
     bottom:-160px;right:-100px;
     animation-delay:-7s;
@@ -71,10 +87,20 @@
     50%{transform:translate3d(24px,-28px,0) scale(1.08);}
   }
 
-  /* 顶部状态条 */
-  .status{
+  /* 内容外壳：用 auto 外边距居中 —— 内容超高时自动归零，绝不被裁切 */
+  .shell{
     position:relative;
     z-index:1;
+    margin:auto 0;
+    width:100%;
+    max-width:1180px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+
+  /* 顶部状态条 */
+  .status{
     display:flex;
     align-items:center;
     gap:10px;
@@ -84,8 +110,12 @@
     color:var(--muted);
     text-transform:uppercase;
     margin-bottom:26px;
+    text-align:center;
+    flex-wrap:wrap;
+    justify-content:center;
   }
   .dot{
+    flex:0 0 auto;
     width:7px;height:7px;
     border-radius:50%;
     background:#22ffa7;
@@ -96,8 +126,6 @@
 
   /* 标题 */
   h1{
-    position:relative;
-    z-index:1;
     font-size:clamp(2.2rem,7vw,4.4rem);
     font-weight:800;
     letter-spacing:.06em;
@@ -116,8 +144,6 @@
   }
 
   .subtitle{
-    position:relative;
-    z-index:1;
     margin-top:16px;
     font-size:14px;
     letter-spacing:.18em;
@@ -127,11 +153,10 @@
   }
 
   .divider{
-    position:relative;
-    z-index:1;
     width:min(560px,80%);
     height:1px;
     margin:34px 0 40px;
+    position:relative;
     background:linear-gradient(90deg,transparent,rgba(0,240,255,.55),transparent);
   }
   .divider::after{
@@ -146,14 +171,12 @@
 
   /* 按钮容器 */
   .grid{
-    position:relative;
-    z-index:1;
     display:flex;
     flex-wrap:wrap;
     justify-content:center;
+    align-items:stretch;
     gap:24px;
     width:100%;
-    max-width:1180px;
   }
 
   /* 游戏卡片（大按钮） */
@@ -165,6 +188,7 @@
     position:relative;
     flex:1 1 300px;
     max-width:360px;
+    min-width:0;             /* 防止内容撑破窄屏 */
     min-height:232px;
     padding:26px 28px 24px;
     border-radius:18px;
@@ -260,6 +284,7 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
+    gap:10px;
     margin-bottom:22px;
   }
   .idx{
@@ -270,6 +295,7 @@
     opacity:.9;
   }
   .tag{
+    flex:0 0 auto;
     font-family:"SFMono-Regular",Consolas,monospace;
     font-size:10.5px;
     letter-spacing:.2em;
@@ -315,6 +341,7 @@
 
   .play svg{
     width:14px;height:14px;
+    flex:0 0 auto;
     fill:none;
     stroke:currentColor;
     stroke-width:2;
@@ -323,8 +350,6 @@
   }
 
   footer{
-    position:relative;
-    z-index:1;
     margin-top:52px;
     font-family:"SFMono-Regular",Consolas,monospace;
     font-size:11.5px;
@@ -333,16 +358,98 @@
     text-align:center;
   }
 
+  /* ============ 响应式 ============ */
+
+  /* 中等屏：两列 */
   @media (max-width:1024px){
-    .game-card{flex:1 1 280px;}
+    .game-card{flex:1 1 280px;max-width:420px;}
   }
 
+  /* 平板竖屏：两列更宽松 */
+  @media (max-width:860px){
+    .grid{gap:20px;}
+    .game-card{flex:1 1 260px;max-width:340px;min-height:220px;padding:24px 24px 22px;}
+  }
+
+  /* 手机：单列，卡片高度完全由内容决定，杜绝裁切 */
   @media (max-width:720px){
-    body{padding:36px 18px;}
-    .grid{gap:18px;}
-    .game-card{padding:24px 22px 22px;min-height:210px;max-width:none;}
+    body{
+      padding-top:calc(var(--safe-top) + 32px);
+      padding-bottom:calc(var(--safe-bottom) + 36px);
+      padding-left:18px;
+      padding-right:18px;
+      justify-content:flex-start;
+    }
+    .shell{margin:0;}
+
+    .status{
+      font-size:10.5px;
+      letter-spacing:.16em;
+      gap:7px;
+      margin-bottom:18px;
+    }
+
+    h1{font-size:clamp(1.95rem,9vw,2.6rem);}
+    .subtitle{
+      margin-top:12px;
+      font-size:12.5px;
+      letter-spacing:.1em;
+      line-height:1.6;
+      padding:0 4px;
+    }
+
+    .divider{margin:22px 0 26px;width:min(100%,420px);}
+
+    .grid{
+      flex-direction:column;
+      flex-wrap:nowrap;
+      align-items:stretch;
+      gap:16px;
+    }
+
+    .game-card{
+      flex:0 0 auto;
+      width:100%;
+      max-width:none;
+      min-height:0;            /* 关键修复：不再固定最小高度 */
+      padding:22px 20px 20px;
+      border-radius:16px;
+    }
+
     .card-top{margin-bottom:16px;}
-    .divider{margin:26px 0 30px;}
+    .game-card h2{font-size:1.35rem;margin-bottom:8px;}
+    .desc{font-size:13px;line-height:1.65;}
+
+    .play{
+      padding-top:18px;
+      font-size:11.5px;
+      letter-spacing:.18em;
+    }
+
+    footer{
+      margin-top:34px;
+      font-size:10.5px;
+      letter-spacing:.12em;
+      padding-bottom:4px;
+    }
+  }
+
+  /* 超窄屏（≤380px，如 iPhone SE） */
+  @media (max-width:380px){
+    body{padding-left:14px;padding-right:14px;}
+    h1{font-size:1.8rem;}
+    .game-card{padding:20px 16px 18px;}
+    .tag{font-size:9.5px;padding:3px 8px;letter-spacing:.14em;}
+    .desc{font-size:12.5px;}
+  }
+
+  /* 横屏矮屏：避免卡片被压缩 */
+  @media (max-height:520px) and (orientation:landscape){
+    body{padding-top:calc(var(--safe-top) + 24px);padding-bottom:calc(var(--safe-bottom) + 24px);}
+    .shell{margin:0 auto;}
+    h1{font-size:clamp(1.6rem,5vw,2.2rem);}
+    .subtitle{display:none;}
+    .divider{margin:16px 0 20px;}
   }
 
   @media (prefers-reduced-motion:reduce){
@@ -355,86 +462,90 @@
   <div class="orb orb-1"></div>
   <div class="orb orb-2"></div>
 
-  <div class="status">
-    <span class="dot"></span>
-    SYSTEM ONLINE&nbsp;//&nbsp;GAME LIBRARY
+  <div class="shell">
+
+    <div class="status">
+      <span class="dot"></span>
+      SYSTEM ONLINE&nbsp;//&nbsp;GAME LIBRARY
+    </div>
+
+    <h1>我的游戏库</h1>
+    <p class="subtitle">已加载 5 款游戏 · 选择你的战场</p>
+
+    <div class="divider"></div>
+
+    <main class="grid">
+
+      <a class="game-card" href="number.html" target="_blank" rel="noopener">
+        <div class="card-top">
+          <span class="idx">01</span>
+          <span class="tag">PUZZLE</span>
+        </div>
+        <h2>数字融合</h2>
+        <p class="desc">点击分裂，拖拽合成</p>
+        <span class="play">
+          START
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+      <a class="game-card violet" href="breakout.html" target="_blank" rel="noopener">
+        <div class="card-top">
+          <span class="idx">02</span>
+          <span class="tag">ARCADE</span>
+        </div>
+        <h2>打砖块</h2>
+        <p class="desc">移动鼠标接球，打碎所有砖块</p>
+        <span class="play">
+          START
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+      <a class="game-card magenta" href="starrub.html" target="_blank" rel="noopener">
+        <div class="card-top">
+          <span class="idx">03</span>
+          <span class="tag">STARRY</span>
+        </div>
+        <h2>星云揉皱</h2>
+        <p class="desc">按住屏幕揉捏星空，松开恢复</p>
+        <span class="play">
+          START
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+      <a class="game-card amber" href="tornado.html" target="_blank" rel="noopener">
+        <div class="card-top">
+          <span class="idx">04</span>
+          <span class="tag">STORM</span>
+        </div>
+        <h2>赛博龙卷风</h2>
+        <p class="desc">拖动龙卷风，卷碎掉落物</p>
+        <span class="play">
+          START
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+      <a class="game-card indigo" href="blackholegraffiti.html" target="_blank" rel="noopener">
+        <div class="card-top">
+          <span class="idx">05</span>
+          <span class="tag">GRAVITY</span>
+        </div>
+        <h2>黑洞涂鸦</h2>
+        <p class="desc">手指随意涂鸦，看线条被引力吞噬</p>
+        <span class="play">
+          START
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+    </main>
+
+    <footer>// MORE GAMES COMING SOON</footer>
+
   </div>
-
-  <h1>我的游戏库</h1>
-  <p class="subtitle">已加载 5 款游戏 · 选择你的战场</p>
-
-  <div class="divider"></div>
-
-  <main class="grid">
-
-    <a class="game-card" href="number.html" target="_blank" rel="noopener">
-      <div class="card-top">
-        <span class="idx">01</span>
-        <span class="tag">PUZZLE</span>
-      </div>
-      <h2>数字融合</h2>
-      <p class="desc">点击分裂，拖拽合成</p>
-      <span class="play">
-        START
-        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </span>
-    </a>
-
-    <a class="game-card violet" href="breakout.html" target="_blank" rel="noopener">
-      <div class="card-top">
-        <span class="idx">02</span>
-        <span class="tag">ARCADE</span>
-      </div>
-      <h2>打砖块</h2>
-      <p class="desc">移动鼠标接球，打碎所有砖块</p>
-      <span class="play">
-        START
-        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </span>
-    </a>
-
-    <a class="game-card magenta" href="starrub.html" target="_blank" rel="noopener">
-      <div class="card-top">
-        <span class="idx">03</span>
-        <span class="tag">STARRY</span>
-      </div>
-      <h2>星云揉皱</h2>
-      <p class="desc">按住屏幕揉捏星空，松开恢复</p>
-      <span class="play">
-        START
-        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </span>
-    </a>
-
-    <a class="game-card amber" href="tornado.html" target="_blank" rel="noopener">
-      <div class="card-top">
-        <span class="idx">04</span>
-        <span class="tag">STORM</span>
-      </div>
-      <h2>赛博龙卷风</h2>
-      <p class="desc">拖动龙卷风，卷碎掉落物</p>
-      <span class="play">
-        START
-        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </span>
-    </a>
-
-    <a class="game-card indigo" href="blackholegraffiti.html" target="_blank" rel="noopener">
-      <div class="card-top">
-        <span class="idx">05</span>
-        <span class="tag">GRAVITY</span>
-      </div>
-      <h2>黑洞涂鸦</h2>
-      <p class="desc">手指随意涂鸦，看线条被引力吞噬</p>
-      <span class="play">
-        START
-        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-      </span>
-    </a>
-
-  </main>
-
-  <footer>// MORE GAMES COMING SOON</footer>
 
 </body>
 </html>

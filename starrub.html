@@ -2,711 +2,581 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#04030a">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#05040d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>星云揉纸 · 按住把星空揉成团</title>
+<title>星云揉皱 · 按住揉星空</title>
 <style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{
-    position:fixed;inset:0;width:100%;height:100%;
-    overflow:hidden;background:#04030a;
-    touch-action:none;overscroll-behavior:none;
-    -webkit-user-select:none;user-select:none;
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html, body{
+    position:fixed; left:0; top:0; right:0; bottom:0;
+    width:100%; height:100%;
+    overflow:hidden; background:#05040d;
+    touch-action:none; -ms-touch-action:none;
+    -webkit-overflow-scrolling:auto;
+    -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none; user-select:none;
     -webkit-touch-callout:none;
-    -webkit-tap-highlight-color:transparent;
+    -webkit-tap-highlight-color:rgba(0,0,0,0);
+    -webkit-text-size-adjust:100%;
   }
-  #c{display:block;width:100%;height:100%;touch-action:none;}
+  #c{
+    position:fixed; left:0; top:0;
+    width:100%; height:100%;
+    display:block;
+    touch-action:none;
+    -webkit-tap-highlight-color:rgba(0,0,0,0);
+  }
   #hint{
-    position:fixed;left:0;right:0;bottom:calc(30px + env(safe-area-inset-bottom,0px));
+    position:fixed; left:0; right:0;
+    bottom:34px;
+    bottom:calc(34px + env(safe-area-inset-bottom, 0px));
     text-align:center;
-    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
-    font-size:13px;letter-spacing:.2em;color:rgba(188,205,255,.62);
-    text-shadow:0 0 22px rgba(90,130,255,.7);
-    pointer-events:none;opacity:1;transition:opacity 1.1s ease;
-    animation:breathe 3.4s ease-in-out infinite;
+    font-family:-apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    font-size:13px; letter-spacing:2px; line-height:1.6;
+    color:rgba(190,206,255,0.65);
+    text-shadow:0 0 18px rgba(90,130,255,0.7);
+    pointer-events:none;
+    -webkit-transition:opacity .9s ease;
+    transition:opacity .9s ease;
   }
-  @keyframes breathe{0%,100%{opacity:.4}50%{opacity:.95}}
-  #hint.gone{opacity:0!important;animation:none}
-  #err{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-    color:#8fa4ff;font:14px/1.9 -apple-system,sans-serif;text-align:center;padding:24px}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">按住屏幕 · 把星空揉成团</div>
-<div id="err" hidden>当前浏览器不支持 WebGL<br>换个浏览器试试吧</div>
+<div id="hint">按住屏幕 · 揉皱星空</div>
 
 <script>
 (function () {
   'use strict';
 
   var canvas = document.getElementById('c');
-  var glOpts = {
-    alpha: false, antialias: false, depth: false, stencil: false,
-    premultipliedAlpha: false, preserveDrawingBuffer: false,
-    powerPreference: 'high-performance'
-  };
-  var gl = canvas.getContext('webgl', glOpts) || canvas.getContext('experimental-webgl', glOpts);
-  if (!gl) { document.getElementById('err').hidden = false; return; }
+  var ctx = canvas.getContext('2d');
+  var hintEl = document.getElementById('hint');
 
-  /* =======================================================================
-     着色器
-     ======================================================================= */
-
-  var VS = [
-    'attribute vec2 aPos;',
-    'varying vec2 vUv;',
-    'void main(){',
-    '  vUv = aPos * 0.5 + 0.5;',
-    '  gl_Position = vec4(aPos, 0.0, 1.0);',
-    '}'
-  ].join('\n');
-
-  /* ---------- 星云层：低分辨率离屏渲染，逐帧采样时再做揉皱 ---------- */
-  var NEB_FS = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-varying vec2 vUv;
-uniform vec2  uRes;
-uniform float uTime;
-
-float hash21(vec2 p){
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-float nz(vec2 p){
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-float fbm(vec2 p){
-  float v = 0.0, a = 0.5;
-  for (int i = 0; i < 4; i++){
-    v += a * nz(p);
-    p = mat2(0.80, 0.60, -0.60, 0.80) * p * 2.04;
-    a *= 0.52;
-  }
-  return v;
-}
-
-void main(){
-  float aspect = uRes.x / max(uRes.y, 1.0);
-  vec2 p = (vUv - 0.5) * vec2(aspect, 1.0) * 2.4;
-  float t = uTime;
-
-  // 域扭曲 (domain warping) 产生丝状星云
-  vec2 q = vec2(
-    fbm(p * 1.05 + vec2(0.0, t * 0.045)),
-    fbm(p * 1.05 + vec2(4.7, 2.3) - vec2(t * 0.035, 0.0))
-  );
-  vec2 r = vec2(
-    fbm(p * 1.85 + q * 1.70 + vec2(1.7, 9.2) + t * 0.050),
-    fbm(p * 1.85 + q * 1.70 + vec2(8.3, 2.8) - t * 0.045)
-  );
-  float f = fbm(p * 0.85 + r * 1.60);
-
-  vec3 col = vec3(0.012, 0.016, 0.045);
-  col = mix(col, vec3(0.045, 0.105, 0.380), smoothstep(0.26, 0.80, f));
-  col = mix(col, vec3(0.400, 0.085, 0.520), smoothstep(0.50, 1.05, q.x * q.y * 2.4));
-  col = mix(col, vec3(0.055, 0.470, 0.660), smoothstep(0.35, 0.95, r.x * r.y * 2.2) * 0.62);
-  col = mix(col, vec3(0.950, 0.420, 0.280), smoothstep(0.55, 1.05, r.y * r.x * 1.9) * 0.30);
-  col *= 0.45 + 1.05 * f;
-  col += vec3(0.35, 0.65, 0.95) * pow(max(f - 0.62, 0.0), 2.0) * 1.2;
-
-  gl_FragColor = vec4(max(col, 0.0), 1.0);
-}
-`;
-
-  /* ---------- 主层：采样星云 + 揉皱变形 + 程序化星星 + 冲击波 ---------- */
-  var MAIN_FS = `
-#ifdef GL_FRAGMENT_PRECISION_HIGH
-precision highp float;
-#else
-precision mediump float;
-#endif
-varying vec2 vUv;
-
-uniform sampler2D uNeb;
-uniform vec2  uRes;
-uniform float uTime;
-uniform vec2  uCenter;    // 手指位置 (uv 0..1)
-uniform float uRadius;    // 抓取半径 (屏幕高度为 1.0)
-uniform float uCrumple;   // 揉皱量: 1=完全揉成团, 负值=回弹外扩
-uniform float uShock;     // 冲击波进度 0..1, 1=无
-uniform vec2  uShockC;
-
-float hash21(vec2 p){
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-vec2 hash22(vec2 p){
-  vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.xx + p3.yz) * p3.zy);
-}
-float nz(vec2 p){
-  vec2 i = floor(p), f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  float a = hash21(i);
-  float b = hash21(i + vec2(1.0, 0.0));
-  float c = hash21(i + vec2(0.0, 1.0));
-  float d = hash21(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-mat2 rot(float a){ float s = sin(a), c = cos(a); return mat2(c, s, -s, c); }
-
-// 网格法星点：随坐标被挤压时会自然聚拢，形成密集星团
-float starLayer(vec2 p, float t, float dens, float seed, float sz, out vec3 sc){
-  vec2 g  = p * dens;
-  vec2 id = floor(g);
-  vec2 f  = fract(g) - 0.5;
-  vec2 h  = hash22(id + seed);
-  float present = step(0.70, h.x);
-  vec2 off = (hash22(id + seed + 19.0) - 0.5) * 0.78;
-  float dist = length(f - off);
-  float br = 0.25 + 0.75 * hash21(id + seed + 5.0);
-  float tw = 0.62 + 0.38 * sin(t * (0.8 + 3.0 * br) + br * 31.0);
-  float core = 1.0 - smoothstep(sz * 0.12, sz, dist);
-  float hs = hash21(id + seed + 3.0);
-  sc = mix(vec3(0.62, 0.76, 1.00), vec3(1.00, 0.88, 0.72), hs);
-  return core * br * tw * present;
-}
-
-void main(){
-  float aspect = uRes.x / max(uRes.y, 1.0);
-  vec2 p = (vUv - 0.5) * vec2(aspect, 1.0);
-  vec2 c = (uCenter - 0.5) * vec2(aspect, 1.0);
-
-  float cs = max(uCrumple, -0.22);
-  float a  = max(cs, 0.0);
-  float R  = max(uRadius, 0.06);
-
-  vec2  d = p - c;
-  float r = length(d);
-  float g = exp(-(r * r) / (R * R));      // 手指附近的权重
-  float amt = a * g;
-
-  // 采样坐标向外扩张 => 画面向内收缩；cs<0 时反向 => 回弹鼓起
-  float sfall = 1.0 + (0.52 + 1.15 * g) * cs;
-  vec2 q = c + rot((0.85 + 1.70 * g) * cs) * d * sfall;
-
-  // 褶皱：高频噪声位移 + 明暗折痕
-  float nf = 7.0 + 7.0 * a;
-  vec2 np = q * nf;
-  float n1 = nz(np + vec2(0.0, uTime * 0.25));
-  float n2 = nz(np * 1.9 + 17.0 - uTime * 0.15);
-  float n3 = nz(np * 3.7 + 4.0);
-  q += (vec2(n1, n2) - 0.5) * (0.09 + 0.30 * g) * a;
-
-  // 背景星云
-  vec3 col = texture2D(uNeb, q / vec2(aspect, 1.0) + 0.5).rgb;
-
-  // 星空
-  vec3 sc;
-  float s1 = starLayer(q, uTime, 36.0, 1.0, 0.0075, sc);
-  col += sc * s1 * 1.55;
-  float s2 = starLayer(q + 13.0, uTime, 78.0, 7.0, 0.0042, sc);
-  col += sc * s2 * 0.85;
-
-  // 折痕明暗
-  float shade = mix(1.0, 0.30 + 1.15 * n1, a);
-  shade *= mix(1.0, 0.55 + 0.85 * (n2 * 0.6 + n3 * 0.4), a * 0.7);
-  col *= shade;
-  col += vec3(0.45, 0.55, 0.95) * pow(max(n1 - 0.58, 0.0) * 2.2, 3.0) * a * 0.9;
-
-  // 团成球：外部压暗
-  float Rb = 0.62 / (1.0 + 0.85 * a);
-  float ball = 1.0 - smoothstep(Rb * 0.50, Rb, r);
-  col *= mix(1.0, 0.05 + 0.95 * ball, a);
-  col += vec3(0.35, 0.45, 0.90) * amt * 0.18 * exp(-(r * r) / (R * R * 0.55));
-
-  // 球体边缘光环
-  float rim = (1.0 - smoothstep(Rb * 0.80, Rb * 1.02, r)) * smoothstep(Rb * 0.35, Rb * 0.80, r);
-  col += vec3(0.45, 0.55, 1.00) * rim * a * 0.55;
-
-  // 松手冲击波
-  if (uShock < 1.0){
-    vec2 scn = (uShockC - 0.5) * vec2(aspect, 1.0);
-    float rr = uShock * 1.5;
-    float dd = abs(length(p - scn) - rr);
-    float ring = (1.0 - smoothstep(0.0, 0.055, dd)) * pow(1.0 - uShock, 2.0);
-    col += vec3(0.55, 0.72, 1.00) * ring * 0.85;
+  if (!ctx) {
+    document.body.innerHTML = '<div style="color:#8fa4ff;font:14px sans-serif;padding:30px;text-align:center">你的浏览器不支持 Canvas</div>';
+    return;
   }
 
-  // 暗角 / 色调映射 / 抖动去色带
-  float vd = length(p * vec2(0.95, 1.0)) * 1.75;
-  col *= 1.0 - 0.42 * pow(min(vd, 1.0), 2.2);
-  col = 1.0 - exp(-col * 1.35);
-  col += (hash21(gl_FragCoord.xy + fract(uTime)) - 0.5) * 0.008;
+  /* ---------------------------------------------------------------
+     基础状态
+     --------------------------------------------------------------- */
+  var W = 1, H = 1, dpr = 1, unit = 1, quality = 1;
+  var bg = null, vig = null;
+  var neb = [];      // 星云粒子
+  var stars = [];    // 星点
+  var usingTouch = false;
+  var hintGone = false;
 
-  gl_FragColor = vec4(max(col, 0.0), 1.0);
-}
-`;
-
-  /* ---------- 星尘粒子（点精灵，加色混合） ---------- */
-  var DUST_VS = `
-attribute vec2  aPos;
-attribute float aSize;
-attribute vec3  aColor;
-attribute float aAlpha;
-uniform float uPx;
-varying vec3  vCol;
-varying float vA;
-void main(){
-  gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0);
-  gl_PointSize = max(aSize * uPx, 1.0);
-  vCol = aColor;
-  vA   = aAlpha;
-}
-`;
-
-  var DUST_FS = `
-precision mediump float;
-varying vec3  vCol;
-varying float vA;
-void main(){
-  vec2  d = gl_PointCoord - 0.5;
-  float r = length(d) * 2.0;
-  float a    = 1.0 - smoothstep(0.0, 1.0, r);
-  float core = 1.0 - smoothstep(0.0, 0.42, r);
-  float al = (a * a * 0.55 + core * 0.90) * vA;
-  gl_FragColor = vec4(vCol * (0.80 + core * 1.40), al);
-}
-`;
-
-  /* =======================================================================
-     GL 工具
-     ======================================================================= */
-
-  function compile(type, src) {
-    var s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.error(gl.getShaderInfoLog(s), src);
-    }
-    return s;
-  }
-
-  function build(vsSrc, fsSrc) {
-    var p = gl.createProgram();
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
-    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      console.error(gl.getProgramInfoLog(p));
-    }
-    var u = {}, a = {}, i, info;
-    var nu = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
-    for (i = 0; i < nu; i++) {
-      info = gl.getActiveUniform(p, i);
-      u[info.name.replace('[0]', '')] = gl.getUniformLocation(p, info.name);
-    }
-    var na = gl.getProgramParameter(p, gl.ACTIVE_ATTRIBUTES);
-    for (i = 0; i < na; i++) {
-      info = gl.getActiveAttrib(p, i);
-      a[info.name] = gl.getAttribLocation(p, info.name);
-    }
-    return { p: p, u: u, a: a };
-  }
-
-  var nebProg  = build(VS, NEB_FS);
-  var mainProg = build(VS, MAIN_FS);
-  var dustProg = build(DUST_VS, DUST_FS);
-
-  /* 全屏四边形 */
-  var quadBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-
-  /* =======================================================================
-     尺寸 / 离屏目标
-     ======================================================================= */
-
-  var cw = 1, ch = 1, renderW = 1, renderH = 1, nebW = 1, nebH = 1;
-  var quality = 1;
-  var nebTex = null, nebFbo = null;
-
-  function setupTargets() {
-    if (nebTex) { gl.deleteTexture(nebTex); nebTex = null; }
-    if (nebFbo) { gl.deleteFramebuffer(nebFbo); nebFbo = null; }
-
-    nebTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, nebTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, nebW, nebH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-    nebFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, nebFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, nebTex, 0);
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-      console.warn('nebula framebuffer incomplete');
-    }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  function resize() {
-    cw = Math.max(1, Math.floor(window.innerWidth));
-    ch = Math.max(1, Math.floor(window.innerHeight));
-
-    var dpr = window.devicePixelRatio || 1;
-    var s = Math.min(dpr, 2) * 0.85 * quality;
-
-    var budget = 1400000;                       // 像素预算，弱机自动降分辨率
-    if (cw * ch * s * s > budget) s = Math.sqrt(budget / (cw * ch));
-    s = Math.max(0.5, s);
-
-    renderW = Math.max(2, Math.round(cw * s));
-    renderH = Math.max(2, Math.round(ch * s));
-    canvas.width = renderW;
-    canvas.height = renderH;
-
-    nebW = Math.max(96, Math.min(360, Math.round(renderW * 0.62)));
-    nebH = Math.max(96, Math.round(nebW * renderH / renderW));
-
-    setupTargets();
-  }
-
-  /* =======================================================================
-     状态 & 物理
-     ======================================================================= */
-
-  var state = {
-    time: 0,
-    crumple: 0, vel: 0,
-    pressing: false,
-    hold: 0, drag: 0,
-    cx: 0.5, cy: 0.5,     // 目标中心 (uv)
-    sx: 0.5, sy: 0.5,     // 平滑中心
-    radius: 0.30,
-    shock: 1, shockX: 0.5, shockY: 0.5
+  // 指针（手指 / 鼠标）状态
+  var P = {
+    down: false,
+    x: 0, y: 0,
+    vx: 0, vy: 0,      // 快速移动产生的“风”
+    hold: 0,           // 按住时长 0..1
+    radius: 100
   };
 
-  function spring(target, k, zeta, dt) {
-    var c = 2 * Math.sqrt(k) * zeta;
-    var steps = Math.max(1, Math.ceil(dt / (1 / 300)));
-    var h = dt / steps;
-    var x = state.crumple, v = state.vel;
-    for (var i = 0; i < steps; i++) {
-      var acc = k * (target - x) - c * v;
-      v += acc * h;
-      x += v * h;
-    }
-    if (x > 1.15) x = 1.15;
-    if (x < -0.35) x = -0.35;
-    state.crumple = x;
-    state.vel = v;
+  // 每帧传给粒子的力场参数（避免每帧创建闭包）
+  var F = {
+    down: false, px: 0, py: 0,
+    R: 1, R2: 1, S: 0, wx: 0, wy: 0,
+    f: 1, damp: 0.9
+  };
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  function gauss() {
+    var u = 0, v = 0;
+    while (u === 0) { u = Math.random(); }
+    while (v === 0) { v = Math.random(); }
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.283185307 * v);
   }
 
-  function update(dt) {
-    state.time += dt;
+  /* ---------------------------------------------------------------
+     预渲染精灵（软光斑 / 星点），避免每帧创建渐变
+     --------------------------------------------------------------- */
+  var glowCache = {};
 
-    if (state.pressing) {
-      state.hold += dt;
-      var target = 0.14 + 0.62 * (1 - Math.exp(-state.hold * 1.7)) + state.drag * 0.0011;
-      if (target > 1) target = 1;
-      spring(target, 210, 0.92, dt);          // 跟手：快速逼近，几乎无延迟
-    } else {
-      spring(0, 115, 0.30, dt);               // 松手：欠阻尼弹回，带回弹过冲
-      if (Math.abs(state.crumple) < 0.0025 && Math.abs(state.vel) < 0.02) {
-        state.crumple = 0; state.vel = 0;
+  function glowSprite(r, g, b, core) {
+    var key = r + '_' + g + '_' + b + '_' + core;
+    if (glowCache[key]) { return glowCache[key]; }
+
+    var S = 64;
+    var cv = document.createElement('canvas');
+    cv.width = S;
+    cv.height = S;
+    var c = cv.getContext('2d');
+    var gr = c.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    gr.addColorStop(0.00, 'rgba(' + r + ',' + g + ',' + b + ',' + core + ')');
+    gr.addColorStop(0.22, 'rgba(' + r + ',' + g + ',' + b + ',' + (core * 0.40) + ')');
+    gr.addColorStop(0.52, 'rgba(' + r + ',' + g + ',' + b + ',' + (core * 0.11) + ')');
+    gr.addColorStop(1.00, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+    c.fillStyle = gr;
+    c.fillRect(0, 0, S, S);
+    glowCache[key] = cv;
+    return cv;
+  }
+
+  var starCache = {};
+  function starSprite(r, g, b) {
+    var key = r + '_' + g + '_' + b;
+    if (starCache[key]) { return starCache[key]; }
+
+    var S = 24;
+    var cv = document.createElement('canvas');
+    cv.width = S;
+    cv.height = S;
+    var c = cv.getContext('2d');
+    var gr = c.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    gr.addColorStop(0.00, 'rgba(' + r + ',' + g + ',' + b + ',1)');
+    gr.addColorStop(0.14, 'rgba(' + r + ',' + g + ',' + b + ',0.72)');
+    gr.addColorStop(0.34, 'rgba(' + r + ',' + g + ',' + b + ',0.16)');
+    gr.addColorStop(1.00, 'rgba(' + r + ',' + g + ',' + b + ',0)');
+    c.fillStyle = gr;
+    c.fillRect(0, 0, S, S);
+    starCache[key] = cv;
+    return cv;
+  }
+
+  var WHITE = glowSprite(255, 255, 255, 0.5);
+
+  /* ---------------------------------------------------------------
+     背景（一次性预渲染，每帧 1 次 drawImage）
+     --------------------------------------------------------------- */
+  function buildBG() {
+    bg = document.createElement('canvas');
+    var w = Math.max(2, Math.round(W * 0.5));
+    var h = Math.max(2, Math.round(H * 0.5));
+    bg.width = w;
+    bg.height = h;
+    var b = bg.getContext('2d');
+
+    b.fillStyle = '#05040d';
+    b.fillRect(0, 0, w, h);
+
+    var blobs = [
+      [0.24, 0.16, 0.80, 'rgba(52,44,124,0.60)'],
+      [0.80, 0.28, 0.72, 'rgba(86,28,116,0.52)'],
+      [0.46, 0.80, 0.88, 'rgba(22,64,116,0.50)'],
+      [0.12, 0.66, 0.62, 'rgba(66,22,84,0.40)'],
+      [0.66, 0.58, 0.66, 'rgba(30,72,132,0.34)']
+    ];
+    var i, bd, g;
+    for (i = 0; i < blobs.length; i++) {
+      bd = blobs[i];
+      g = b.createRadialGradient(w * bd[0], h * bd[1], 0, w * bd[0], h * bd[1], Math.max(w, h) * bd[2]);
+      g.addColorStop(0, bd[3]);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      b.fillStyle = g;
+      b.fillRect(0, 0, w, h);
+    }
+  }
+
+  function buildVig() {
+    vig = document.createElement('canvas');
+    vig.width = 128;
+    vig.height = 128;
+    var c = vig.getContext('2d');
+    var g = c.createRadialGradient(64, 64, 8, 64, 64, 92);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(0.55, 'rgba(0,0,0,0.10)');
+    g.addColorStop(1, 'rgba(0,0,0,0.62)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, 128, 128);
+  }
+
+  /* ---------------------------------------------------------------
+     生成粒子
+     --------------------------------------------------------------- */
+  function buildScene() {
+    neb.length = 0;
+    stars.length = 0;
+
+    var base = Math.min(W, H);
+    var area = W * H;
+
+    var nNeb  = clamp(Math.round(area / 1500), 260, 880);
+    var nStar = clamp(Math.round(area / 2600), 140, 480);
+
+    // 云团骨架（让粒子聚成丝状云，而不是均匀噪点）
+    var nCloud = 5 + ((Math.random() * 3) | 0);
+    var clouds = [], i;
+    for (i = 0; i < nCloud; i++) {
+      clouds.push({
+        x: W * (0.10 + Math.random() * 0.80),
+        y: H * (0.10 + Math.random() * 0.80),
+        r: base * (0.10 + Math.random() * 0.20)
+      });
+    }
+
+    var COLS = [
+      [90, 110, 255],   // 深蓝
+      [186, 88, 232],   // 品红
+      [64, 200, 226],   // 青
+      [255, 138, 92],   // 暖橙
+      [200, 150, 255]   // 淡紫
+    ];
+
+    var x, y, deep, q, ci, col, bright, spr, sz, c;
+    for (i = 0; i < nNeb; i++) {
+      if (Math.random() < 0.74) {
+        c = clouds[(Math.random() * clouds.length) | 0];
+        x = c.x + gauss() * c.r * 0.55;
+        y = c.y + gauss() * c.r * 0.55;
+        deep = 1;
+      } else {
+        x = Math.random() * W;
+        y = Math.random() * H;
+        deep = 0.45;
       }
+
+      q = Math.random();
+      if (q < 0.33) { ci = 0; }
+      else if (q < 0.62) { ci = 1; }
+      else if (q < 0.82) { ci = 2; }
+      else if (q < 0.93) { ci = 3; }
+      else { ci = 4; }
+
+      col = COLS[ci];
+      bright = Math.random() < 0.14;
+      spr = glowSprite(col[0], col[1], col[2], bright ? 0.92 : 0.48);
+
+      sz = base * (0.045 + Math.random() * 0.11) * (0.70 + 0.90 * deep);
+      if (bright) { sz *= 1.2; }
+
+      neb.push({
+        hx: x, hy: y, x: x, y: y, vx: 0, vy: 0,
+        size: sz,
+        spr: spr,
+        k: 0.008 + Math.random() * 0.007,
+        ph: Math.random() * 6.283185,
+        sp: 0.4 + Math.random() * 1.1
+      });
     }
 
-    var kk = 1 - Math.exp(-dt * 34);
-    state.sx += (state.cx - state.sx) * kk;
-    state.sy += (state.cy - state.sy) * kk;
+    var sx, sy, sc, sr, sg, sb;
+    for (i = 0; i < nStar; i++) {
+      sx = Math.random() * W;
+      sy = Math.random() * H;
+      sc = Math.random();
+      sr = 255; sg = 255; sb = 255;
+      if (sc < 0.16) { sr = 190; sg = 215; sb = 255; }
+      else if (sc < 0.30) { sr = 255; sg = 232; sb = 200; }
 
-    var rt = 0.30 - 0.10 * Math.max(0, Math.min(1, state.crumple));
-    state.radius += (rt - state.radius) * (1 - Math.exp(-dt * 10));
-
-    if (state.shock < 1) state.shock = Math.min(1, state.shock + dt * 1.7);
-
-    updateDust(dt);
-  }
-
-  /* =======================================================================
-     星尘粒子
-     ======================================================================= */
-
-  var MAXDUST = 900;
-  var parts = [];
-  var inter = new Float32Array(MAXDUST * 7);
-  var dustBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, dustBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, inter.byteLength, gl.DYNAMIC_DRAW);
-
-  var PAL = [
-    [1.00, 0.95, 0.85],
-    [0.70, 0.90, 1.00],
-    [0.60, 1.00, 0.95],
-    [1.00, 0.70, 0.95],
-    [0.75, 0.80, 1.00]
-  ];
-
-  function burst(nx, ny, power, count) {
-    var aspect = cw / ch;
-    for (var i = 0; i < count; i++) {
-      if (parts.length >= MAXDUST) break;
-      var ang = Math.random() * Math.PI * 2;
-      var sp = (0.10 + Math.random() * 0.55) * (0.55 + power * 1.2);
-      var pal = PAL[(Math.random() * PAL.length) | 0];
-      parts.push({
-        x: nx, y: ny,
-        vx: Math.cos(ang) * sp * 0.55 / aspect,
-        vy: Math.sin(ang) * sp * 0.90 + 0.15,
-        age: 0,
-        life: 0.8 + Math.random() * 1.1,
-        size: 1.2 + Math.random() * 3.2 + power * 1.6,
-        g: 0.35 + Math.random() * 0.55,
-        drag: 0.6 + Math.random() * 0.9,
-        c: pal
+      stars.push({
+        hx: sx, hy: sy, x: sx, y: sy, vx: 0, vy: 0,
+        size: 1 + Math.random() * 2.2,
+        spr: starSprite(sr, sg, sb),
+        k: 0.012 + Math.random() * 0.008,
+        ph: Math.random() * 6.283185,
+        sp: 0.8 + Math.random() * 2.2
       });
     }
   }
 
-  function updateDust(dt) {
-    for (var i = parts.length - 1; i >= 0; i--) {
-      var p = parts[i];
-      p.age += dt;
-      if (p.age >= p.life) { parts.splice(i, 1); continue; }
-      p.vy -= p.g * dt;
-      var damp = Math.exp(-p.drag * dt);
-      p.vx *= damp; p.vy *= damp;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      if (p.y < -0.15 || p.y > 1.15 || p.x < -0.25 || p.x > 1.25) parts.splice(i, 1);
-    }
-  }
+  /* ---------------------------------------------------------------
+     物理：排斥力场 + 涡旋 + 弹簧回位
+     --------------------------------------------------------------- */
+  function stepP(p) {
+    var f = F.f;
 
-  /* =======================================================================
-     渲染
-     ======================================================================= */
-
-  var lastNeb = 0;
-
-  function draw(now) {
-    /* --- 1. 星云层（限频刷新，节省 GPU） --- */
-    if (now - lastNeb > 28 || lastNeb === 0) {
-      lastNeb = now;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, nebFbo);
-      gl.viewport(0, 0, nebW, nebH);
-      gl.disable(gl.BLEND);
-      gl.useProgram(nebProg.p);
-      gl.uniform2f(nebProg.u.uRes, nebW, nebH);
-      gl.uniform1f(nebProg.u.uTime, state.time);
-      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-      var np = nebProg.a.aPos;
-      gl.enableVertexAttribArray(np);
-      gl.vertexAttribPointer(np, 2, gl.FLOAT, false, 0, 0);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      gl.disableVertexAttribArray(np);
-    }
-
-    /* --- 2. 主层 --- */
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, renderW, renderH);
-    gl.disable(gl.BLEND);
-    gl.useProgram(mainProg.p);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, nebTex);
-    gl.uniform1i(mainProg.u.uNeb, 0);
-    gl.uniform2f(mainProg.u.uRes, renderW, renderH);
-    gl.uniform1f(mainProg.u.uTime, state.time);
-    gl.uniform2f(mainProg.u.uCenter, state.sx, state.sy);
-    gl.uniform1f(mainProg.u.uRadius, state.radius);
-    gl.uniform1f(mainProg.u.uCrumple, state.crumple);
-    gl.uniform1f(mainProg.u.uShock, state.shock);
-    gl.uniform2f(mainProg.u.uShockC, state.shockX, state.shockY);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-    var mp = mainProg.a.aPos;
-    gl.enableVertexAttribArray(mp);
-    gl.vertexAttribPointer(mp, 2, gl.FLOAT, false, 0, 0);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.disableVertexAttribArray(mp);
-
-    /* --- 3. 星尘 --- */
-    var n = 0, i, p, t, al, o;
-    for (i = 0; i < parts.length && n < MAXDUST; i++) {
-      p = parts[i];
-      t = p.age / p.life;
-      al = (t < 0.08 ? t / 0.08 : 1.0) * Math.pow(1 - t, 1.7);
-      if (al <= 0.002) continue;
-      o = n * 7;
-      inter[o]     = p.x;
-      inter[o + 1] = p.y;
-      inter[o + 2] = p.size;
-      inter[o + 3] = p.c[0];
-      inter[o + 4] = p.c[1];
-      inter[o + 5] = p.c[2];
-      inter[o + 6] = al;
-      n++;
-    }
-
-    if (n > 0) {
-      gl.enable(gl.BLEND);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-      gl.useProgram(dustProg.p);
-      gl.uniform1f(dustProg.u.uPx, renderW / cw);
-      gl.bindBuffer(gl.ARRAY_BUFFER, dustBuf);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, inter.subarray(0, n * 7));
-
-      var A = dustProg.a;
-      gl.enableVertexAttribArray(A.aPos);
-      gl.vertexAttribPointer(A.aPos, 2, gl.FLOAT, false, 28, 0);
-      gl.enableVertexAttribArray(A.aSize);
-      gl.vertexAttribPointer(A.aSize, 1, gl.FLOAT, false, 28, 8);
-      gl.enableVertexAttribArray(A.aColor);
-      gl.vertexAttribPointer(A.aColor, 3, gl.FLOAT, false, 28, 12);
-      gl.enableVertexAttribArray(A.aAlpha);
-      gl.vertexAttribPointer(A.aAlpha, 1, gl.FLOAT, false, 28, 24);
-
-      gl.drawArrays(gl.POINTS, 0, n);
-
-      gl.disableVertexAttribArray(A.aPos);
-      gl.disableVertexAttribArray(A.aSize);
-      gl.disableVertexAttribArray(A.aColor);
-      gl.disableVertexAttribArray(A.aAlpha);
-      gl.disable(gl.BLEND);
-    }
-  }
-
-  /* =======================================================================
-     交互
-     ======================================================================= */
-
-  var activeId = null;
-  var hint = document.getElementById('hint');
-  var hinted = false;
-
-  function hideHint() {
-    if (hinted) return;
-    hinted = true;
-    hint.classList.add('gone');
-    setTimeout(function () { hint.style.display = 'none'; }, 1200);
-  }
-  setTimeout(hideHint, 8000);
-
-  function uvFromEvent(e) {
-    var r = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - r.left) / r.width,
-      y: 1 - (e.clientY - r.top) / r.height,
-      w: r.width,
-      h: r.height
-    };
-  }
-
-  function onDown(e) {
-    if (activeId !== null) return;
-    activeId = e.pointerId;
-    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-
-    var u = uvFromEvent(e);
-    state.cx = u.x;
-    state.cy = u.y;
-    state.sx = u.x;          // 立即吸附，保证第一帧就跟手
-    state.sy = u.y;
-    state.pressing = true;
-    state.hold = 0;
-    state.drag = 0;
-    state.shock = 1;
-
-    burst(u.x, u.y, 0.12, 14);
-    hideHint();
-    if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) {} }
-    e.preventDefault();
-  }
-
-  function onMove(e) {
-    if (e.pointerId !== activeId) return;
-    var u = uvFromEvent(e);
-    var dx = (u.x - state.cx) * u.w;
-    var dy = (u.y - state.cy) * u.h;
-    state.drag += Math.sqrt(dx * dx + dy * dy);
-    state.cx = u.x;
-    state.cy = u.y;
-    e.preventDefault();
-  }
-
-  function onUp(e) {
-    if (e.pointerId !== activeId) return;
-    activeId = null;
-    try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
-    release();
-    e.preventDefault();
-  }
-
-  function release() {
-    if (!state.pressing) return;
-    state.pressing = false;
-    var p = Math.max(0, Math.min(1, state.crumple));
-    state.vel -= 1.6 * (0.35 + 0.65 * p);       // 弹回的初始冲量
-    state.shock = 0;
-    state.shockX = state.cx;
-    state.shockY = state.cy;
-    burst(state.cx, state.cy, p, Math.round(60 + 110 * p));
-    if (navigator.vibrate) { try { navigator.vibrate(14); } catch (err) {} }
-  }
-
-  canvas.addEventListener('pointerdown', onDown, { passive: false });
-  canvas.addEventListener('pointermove', onMove, { passive: false });
-  canvas.addEventListener('pointerup', onUp, { passive: false });
-  canvas.addEventListener('pointercancel', onUp, { passive: false });
-  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
-  window.addEventListener('blur', function () { if (activeId !== null) { activeId = null; release(); } });
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden && activeId !== null) { activeId = null; release(); }
-  });
-
-  /* =======================================================================
-     主循环
-     ======================================================================= */
-
-  var lastT = 0, accT = 0, frames = 0;
-
-  function loop(now) {
-    requestAnimationFrame(loop);
-    if (!lastT) lastT = now;
-    var dt = (now - lastT) / 1000;
-    lastT = now;
-    if (!(dt > 0)) dt = 1 / 60;
-    if (dt > 0.05) dt = 0.05;             // 切后台回来不要爆炸
-
-    update(dt);
-    draw(now);
-
-    // 自适应画质
-    accT += dt; frames++;
-    if (frames >= 45) {
-      var avg = accT / frames;
-      if (avg > 0.028 && quality > 0.6) {
-        quality *= 0.88;
-        resize();
+    if (F.down) {
+      var dx = p.x - F.px;
+      var dy = p.y - F.py;
+      var d2 = dx * dx + dy * dy;
+      if (d2 < F.R2) {
+        var d = Math.sqrt(d2) + 0.0001;
+        var ux = dx / d;
+        var uy = dy / d;
+        var fall = 1 - d / F.R;              // 0..1，靠中心最强
+        var pw = F.S * fall * fall;
+        // 径向排斥 + 切向涡旋（“揉”的旋转感）+ 手指拖动的风
+        p.vx += (ux * pw - uy * pw * 0.70 + F.wx * fall) * f;
+        p.vy += (uy * pw + ux * pw * 0.70 + F.wy * fall) * f;
       }
-      accT = 0; frames = 0;
+    }
+
+    // 弹簧回位
+    p.vx += (p.hx - p.x) * p.k * f;
+    p.vy += (p.hy - p.y) * p.k * f;
+
+    // 阻尼
+    p.vx *= F.damp;
+    p.vy *= F.damp;
+
+    // 限速，防止飞出去
+    var sp2 = p.vx * p.vx + p.vy * p.vy;
+    if (sp2 > 900) {
+      var s = 30 / Math.sqrt(sp2);
+      p.vx *= s;
+      p.vy *= s;
+    }
+
+    p.x += p.vx * f;
+    p.y += p.vy * f;
+  }
+
+  function update(dt, f) {
+    if (P.down) {
+      P.hold = Math.min(1, P.hold + dt * 0.6);
+    } else {
+      P.hold = Math.max(0, P.hold - dt * 2.2);
+    }
+
+    P.radius = Math.min(W, H) * (0.24 + 0.15 * P.hold);
+
+    F.down = P.down;
+    F.px = P.x;
+    F.py = P.y;
+    F.R = P.radius;
+    F.R2 = P.radius * P.radius;
+    F.S = (0.50 + 0.45 * P.hold) * unit;
+    F.wx = P.vx * 0.12 * unit;
+    F.wy = P.vy * 0.12 * unit;
+    F.f = f;
+    F.damp = Math.pow(0.90, f);
+
+    var i;
+    for (i = 0; i < neb.length; i++) { stepP(neb[i]); }
+    for (i = 0; i < stars.length; i++) { stepP(stars[i]); }
+
+    // 手指速度衰减
+    var dk = Math.pow(0.80, f);
+    P.vx *= dk;
+    P.vy *= dk;
+  }
+
+  /* ---------------------------------------------------------------
+     渲染
+     --------------------------------------------------------------- */
+  function render(ts) {
+    var t = ts * 0.001;
+    var i, p, s, h, w;
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(bg, 0, 0, W, H);
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 星云
+    for (i = 0; i < neb.length; i++) {
+      p = neb[i];
+      w = Math.sin(t * p.sp + p.ph);
+      s = p.size * (1 + w * 0.05);
+      h = s * 0.5;
+      ctx.drawImage(p.spr, p.x + w * 1.4 - h, p.y + w * 0.9 - h, s, s);
+    }
+
+    // 星点
+    for (i = 0; i < stars.length; i++) {
+      p = stars[i];
+      w = Math.sin(t * p.sp + p.ph);
+      s = p.size * (1 + w * 0.35);
+      if (s < 0.6) { s = 0.6; }
+      h = s * 0.5;
+      ctx.drawImage(p.spr, p.x - h, p.y - h, s, s);
+    }
+
+    // 手指下的柔光
+    if (P.down || P.hold > 0.01) {
+      var gs = P.radius * 1.7;
+      ctx.globalAlpha = (0.10 + 0.10 * P.hold) * (P.down ? 1 : P.hold);
+      ctx.drawImage(WHITE, P.x - gs * 0.5, P.y - gs * 0.5, gs, gs);
+      ctx.globalAlpha = 1;
+    }
+
+    // 暗角
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(vig, 0, 0, W, H);
+  }
+
+  /* ---------------------------------------------------------------
+     尺寸
+     --------------------------------------------------------------- */
+  function applyDPR() {
+    var d = window.devicePixelRatio || 1;
+    dpr = clamp(d, 1, 2) * quality;
+    dpr = clamp(dpr, 0.65, 2);
+
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+  }
+
+  function resize() {
+    W = Math.max(1, canvas.clientWidth || window.innerWidth || 1);
+    H = Math.max(1, canvas.clientHeight || window.innerHeight || 1);
+    unit = clamp(Math.min(W, H) / 420, 0.75, 1.9);
+    quality = 1;
+    applyDPR();
+    buildBG();
+    buildVig();
+    buildScene();
+  }
+
+  var rzTimer = null;
+  function onResize() {
+    if (rzTimer) { clearTimeout(rzTimer); }
+    rzTimer = setTimeout(function () { rzTimer = null; resize(); }, 180);
+  }
+
+  /* ---------------------------------------------------------------
+     交互（touch + mouse 双通道，兼容所有浏览器）
+     --------------------------------------------------------------- */
+  function hideHint() {
+    if (hintGone) { return; }
+    hintGone = true;
+    hintEl.style.opacity = '0';
+    setTimeout(function () { hintEl.style.display = 'none'; }, 1000);
+  }
+  setTimeout(hideHint, 9000);
+
+  function pointerDown(x, y) {
+    P.down = true;
+    P.x = x;
+    P.y = y;
+    P.vx = 0;
+    P.vy = 0;
+    P.hold = 0;
+    hideHint();
+  }
+
+  function pointerMove(x, y) {
+    if (!P.down) { return; }
+    var dx = x - P.x;
+    var dy = y - P.y;
+    P.vx = P.vx * 0.45 + dx * 0.55;
+    P.vy = P.vy * 0.45 + dy * 0.55;
+    P.x = x;
+    P.y = y;
+  }
+
+  function pointerUp() {
+    if (!P.down) { return; }
+    P.down = false;
+    P.vx = 0;
+    P.vy = 0;
+  }
+
+  function localPos(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+
+  // --- 触摸 ---
+  canvas.addEventListener('touchstart', function (e) {
+    usingTouch = true;
+    var tch = e.changedTouches[0];
+    var p = localPos(tch.clientX, tch.clientY);
+    pointerDown(p.x, p.y);
+    if (e.preventDefault) { e.preventDefault(); }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function (e) {
+    var tch = e.touches[0] || e.changedTouches[0];
+    if (!tch) { return; }
+    var p = localPos(tch.clientX, tch.clientY);
+    pointerMove(p.x, p.y);
+    if (e.preventDefault) { e.preventDefault(); }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', function (e) {
+    pointerUp();
+    if (e.preventDefault) { e.preventDefault(); }
+  }, { passive: false });
+
+  canvas.addEventListener('touchcancel', function () {
+    pointerUp();
+  }, false);
+
+  // iOS 上的橡皮筋滚动彻底封杀
+  document.addEventListener('touchmove', function (e) {
+    if (e.target === canvas && e.preventDefault) { e.preventDefault(); }
+  }, { passive: false });
+
+  // --- 鼠标 ---
+  canvas.addEventListener('mousedown', function (e) {
+    if (usingTouch) { return; }
+    var p = localPos(e.clientX, e.clientY);
+    pointerDown(p.x, p.y);
+    if (e.preventDefault) { e.preventDefault(); }
+  }, false);
+
+  window.addEventListener('mousemove', function (e) {
+    if (!P.down || usingTouch) { return; }
+    var p = localPos(e.clientX, e.clientY);
+    pointerMove(p.x, p.y);
+  }, false);
+
+  window.addEventListener('mouseup', function () {
+    if (usingTouch) { return; }
+    pointerUp();
+  }, false);
+
+  // 手势缩放 / 长按菜单
+  document.addEventListener('gesturestart', function (e) {
+    if (e.preventDefault) { e.preventDefault(); }
+  }, false);
+  document.addEventListener('contextmenu', function (e) {
+    if (e.preventDefault) { e.preventDefault(); }
+  }, false);
+
+  // 切后台时松手，回来不会卡住
+  window.addEventListener('blur', pointerUp, false);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { pointerUp(); }
+  }, false);
+
+  /* ---------------------------------------------------------------
+     主循环
+     --------------------------------------------------------------- */
+  var lastT = 0, accT = 0, frameN = 0;
+
+  function loop(ts) {
+    if (!ts) { ts = +new Date(); }
+    requestAnimationFrame(loop);
+
+    if (!lastT) { lastT = ts; }
+    var dt = (ts - lastT) / 1000;
+    lastT = ts;
+    if (!(dt > 0)) { dt = 0.016; }
+    if (dt > 0.05) { dt = 0.05; }
+
+    var f = dt * 60;
+    if (f > 2) { f = 2; }
+
+    try {
+      update(dt, f);
+      render(ts);
+    } catch (err) {
+      // 任何异常都不让整个游戏挂掉
+      if (window.console && console.error) { console.error(err); }
+    }
+
+    // 自适应画质：明显掉帧就降分辨率
+    accT += dt;
+    frameN++;
+    if (frameN >= 50) {
+      var avg = accT / frameN;
+      if (avg > 0.030 && quality > 0.55) {
+        quality *= 0.85;
+        applyDPR();
+      }
+      accT = 0;
+      frameN = 0;
     }
   }
 
-  window.addEventListener('resize', resize);
-  window.addEventListener('orientationchange', function () { setTimeout(resize, 220); });
+  window.addEventListener('resize', onResize, false);
+  window.addEventListener('orientationchange', function () {
+    setTimeout(resize, 260);
+  }, false);
 
   resize();
   requestAnimationFrame(loop);
