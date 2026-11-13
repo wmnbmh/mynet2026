@@ -151,9 +151,9 @@
     display:flex;
     flex-wrap:wrap;
     justify-content:center;
-    gap:28px;
+    gap:24px;
     width:100%;
-    max-width:960px;
+    max-width:1180px;
   }
 
   /* 游戏卡片（大按钮） */
@@ -163,10 +163,10 @@
     --accent-glow:rgba(0,240,255,.38);
 
     position:relative;
-    flex:1 1 340px;
-    max-width:430px;
-    min-height:250px;
-    padding:30px 32px 28px;
+    flex:1 1 300px;
+    max-width:360px;
+    min-height:232px;
+    padding:26px 28px 24px;
     border-radius:18px;
     display:flex;
     flex-direction:column;
@@ -183,18 +183,37 @@
                border-color .4s, box-shadow .4s;
     animation:cardIn .8s cubic-bezier(.22,1,.36,1) both;
   }
-  .game-card:nth-child(1){animation-delay:.28s;}
-  .game-card:nth-child(2){animation-delay:.4s;}
+  .game-card:nth-child(1){animation-delay:.24s;}
+  .game-card:nth-child(2){animation-delay:.34s;}
+  .game-card:nth-child(3){animation-delay:.44s;}
+  .game-card:nth-child(4){animation-delay:.54s;}
+  .game-card:nth-child(5){animation-delay:.64s;}
 
   @keyframes cardIn{
     from{opacity:0;transform:translateY(26px) scale(.97);}
     to{opacity:1;transform:none;}
   }
 
+  /* 各卡片强调色 */
   .game-card.violet{
     --accent:var(--violet);
     --accent-soft:rgba(167,139,250,.24);
     --accent-glow:rgba(139,92,246,.42);
+  }
+  .game-card.magenta{
+    --accent:#ff5ec8;
+    --accent-soft:rgba(255,94,200,.22);
+    --accent-glow:rgba(255,94,200,.40);
+  }
+  .game-card.amber{
+    --accent:#ffb545;
+    --accent-soft:rgba(255,181,69,.22);
+    --accent-glow:rgba(255,164,32,.40);
+  }
+  .game-card.indigo{
+    --accent:#7aa2ff;
+    --accent-soft:rgba(122,162,255,.24);
+    --accent-glow:rgba(90,120,255,.42);
   }
 
   /* 扫光 */
@@ -241,7 +260,7 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
-    margin-bottom:26px;
+    margin-bottom:22px;
   }
   .idx{
     font-family:"SFMono-Regular",Consolas,monospace;
@@ -262,7 +281,7 @@
   }
 
   .game-card h2{
-    font-size:clamp(1.5rem,3.4vw,1.9rem);
+    font-size:clamp(1.4rem,2.6vw,1.75rem);
     font-weight:700;
     letter-spacing:.04em;
     margin-bottom:12px;
@@ -273,15 +292,15 @@
   }
 
   .desc{
-    font-size:14px;
+    font-size:13.5px;
     line-height:1.7;
     color:var(--muted);
-    letter-spacing:.06em;
+    letter-spacing:.05em;
   }
 
   .play{
     margin-top:auto;
-    padding-top:26px;
+    padding-top:22px;
     display:flex;
     align-items:center;
     gap:8px;
@@ -314,11 +333,15 @@
     text-align:center;
   }
 
+  @media (max-width:1024px){
+    .game-card{flex:1 1 280px;}
+  }
+
   @media (max-width:720px){
     body{padding:36px 18px;}
-    .grid{gap:20px;}
-    .game-card{padding:26px 24px 24px;min-height:220px;}
-    .card-top{margin-bottom:18px;}
+    .grid{gap:18px;}
+    .game-card{padding:24px 22px 22px;min-height:210px;max-width:none;}
+    .card-top{margin-bottom:16px;}
     .divider{margin:26px 0 30px;}
   }
 
@@ -338,7 +361,7 @@
   </div>
 
   <h1>我的游戏库</h1>
-  <p class="subtitle">已加载 2 款游戏 · 选择你的战场</p>
+  <p class="subtitle">已加载 5 款游戏 · 选择你的战场</p>
 
   <div class="divider"></div>
 
@@ -364,6 +387,45 @@
       </div>
       <h2>打砖块</h2>
       <p class="desc">移动鼠标接球，打碎所有砖块</p>
+      <span class="play">
+        START
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </span>
+    </a>
+
+    <a class="game-card magenta" href="starrub.html" target="_blank" rel="noopener">
+      <div class="card-top">
+        <span class="idx">03</span>
+        <span class="tag">STARRY</span>
+      </div>
+      <h2>星云揉皱</h2>
+      <p class="desc">按住屏幕揉捏星空，松开恢复</p>
+      <span class="play">
+        START
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </span>
+    </a>
+
+    <a class="game-card amber" href="tornado.html" target="_blank" rel="noopener">
+      <div class="card-top">
+        <span class="idx">04</span>
+        <span class="tag">STORM</span>
+      </div>
+      <h2>赛博龙卷风</h2>
+      <p class="desc">拖动龙卷风，卷碎掉落物</p>
+      <span class="play">
+        START
+        <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </span>
+    </a>
+
+    <a class="game-card indigo" href="blackholegraffiti.html" target="_blank" rel="noopener">
+      <div class="card-top">
+        <span class="idx">05</span>
+        <span class="tag">GRAVITY</span>
+      </div>
+      <h2>黑洞涂鸦</h2>
+      <p class="desc">手指随意涂鸦，看线条被引力吞噬</p>
       <span class="play">
         START
         <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
