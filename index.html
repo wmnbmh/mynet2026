@@ -566,7 +566,10 @@
   var CACHE_KEY = 'gamehub:repoCache:v1';
   var CACHE_TTL = 30 * 60 * 1000;
 
-  /* 静态兜底：缓存过期 + 请求失败时使用（tag 不写则默认 CACHED） */
+  /* 请求超时：网络被墙时尽快静默降级 */
+  var TIMEOUT_MS = 7000;
+
+  /* 静态兜底：缓存过期 + 请求失败时静默使用（tag 不写则默认 CACHED） */
   var FALLBACK_GAMES = [
     { name: '数字融合',   url: 'number.html',            desc: '点击分裂，拖拽合成' },
     { name: '打砖块',     url: 'breakout.html',          desc: '移动鼠标接球，打碎所有砖块' },
@@ -606,8 +609,7 @@
       var obj = JSON.parse(raw);
       if(!obj || typeof obj.ts !== 'number' || !Array.isArray(obj.games)) return null;
 
-      /* 超过 30 分钟视为过期 */
-      if(Date.now() - obj.ts > CACHE_TTL) return null;
+      if(Date.now() - obj.ts > CACHE_TTL) return null;   // 过期
 
       var games = obj.games.filter(isValidGame);
       return games.length ? games : null;
@@ -618,12 +620,9 @@
 
   function writeCache(games){
     try{
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify({
-        ts: Date.now(),
-        games: games
-      }));
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), games: games }));
     }catch(e){
-      /* 隐私模式或空间不足：忽略即可，不影响页面 */
+      /* 隐私模式或空间不足：静默忽略 */
     }
   }
 
@@ -659,7 +658,7 @@
     }else if(dataSource === 'cache'){
       subtitle.textContent = '已加载 ' + total + ' 款游戏 · 本地缓存';
     }else if(dataSource === 'fallback'){
-      subtitle.textContent = '已加载 ' + total + ' 款游戏 · 离线备用';
+      subtitle.textContent = '已加载 ' + total + ' 款游戏';
     }else{
       subtitle.textContent = '已加载 ' + total + ' 款游戏 · 选择你的战场';
     }
@@ -694,14 +693,12 @@
     if(typeof AbortController !== 'undefined'){
       ctrl = new AbortController();
       opts.signal = ctrl.signal;
-      timer = setTimeout(function(){ ctrl.abort(); }, 9000);
+      timer = setTimeout(function(){ ctrl.abort(); }, TIMEOUT_MS);
     }
 
     return fetch(url, opts).then(function(res){
       if(timer) clearTimeout(timer);
-      if(res.status === 403 || res.status === 429) throw new Error('RATE');
-      if(res.status === 404) throw new Error('NOTFOUND');
-      if(!res.ok) throw new Error('HTTP ' + res.status);
+      if(!res.ok) throw new Error('HTTP ' + res.status);   // 403/404/429 一律走失败分支
       return res.json();
     }, function(err){
       if(timer) clearTimeout(timer);
@@ -735,6 +732,7 @@
     subtitle.textContent = '正在扫描仓库…';
   }
 
+  /* 静默降级：无任何提示、无按钮 */
   function useFallback(){
     repoGames = FALLBACK_GAMES.map(function(g){
       return { name: g.name, url: g.url, desc: g.desc, tag: g.tag, source: 'fallback' };
@@ -745,7 +743,7 @@
 
   /* ========== 主流程 ========== */
   function loadGames(){
-    /* 1. 先看缓存：30 分钟内命中就直接渲染，一个请求都不发 */
+    /* 1. 缓存命中（30 分钟内）：直接渲染，不发任何请求 */
     var cached = readCache();
     if(cached){
       repoGames = cached.map(function(g){
@@ -756,15 +754,14 @@
       return;
     }
 
-    /* 2. 缓存缺失/过期：才去请求 API */
+    /* 2. 缓存缺失/过期：尝试请求 */
     showSkeleton();
 
     var i = 0;
 
     function tryNext(){
       if(i >= API_CANDIDATES.length){
-        /* 3. 全部失败：静态兜底，页面永不白屏 */
-        useFallback();
+        useFallback();     // 3. 静默使用内置列表
         return;
       }
 
@@ -774,7 +771,6 @@
         repoGames = parseContents(data);
         dataSource = 'api';
 
-        /* 只有拿到有效结果才写缓存，避免把空列表/失败状态存 30 分钟 */
         if(repoGames.length){
           writeCache(repoGames.map(function(g){
             return { name: g.name, url: g.url, desc: g.desc, tag: g.tag };
@@ -783,7 +779,7 @@
 
         render();
       }).catch(function(){
-        tryNext();
+        tryNext();         // 失败不报错，换下一个地址继续试
       });
     }
 
