@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#000000" />
+<title>黑洞涂鸦</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  body {
+    position: fixed; inset: 0;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #cv {
+    display: block; position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    touch-action: none;
+  }
+  #hint {
+    position: absolute; left: 0; right: 0;
+    bottom: calc(30px + env(safe-area-inset-bottom, 0px));
+    text-align: center;
+    color: #a294d0;
+    font: 400 13px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    letter-spacing: .2em;
+    pointer-events: none;
+    text-shadow: 0 0 14px rgba(150, 100, 255, .6);
+    transition: opacity 1s ease;
+  }
+  #hint.off { opacity: 0; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="hint">用手指在屏幕上涂鸦</div>
+<script>
+(function () {
+'use strict';
+
+/* ================= 基础 ================= */
+var cv   = document.getElementById('cv');
+var ctx  = cv.getContext('2d', { alpha: false });
+var hint = document.getElementById('hint');
+
+var TAU = Math.PI * 2;
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+var W = 0, H = 0, DPR = 1;
+var cx = 0, cy = 0;
+var coreR = 40, diskR = 118, absorbR = 74;
+
+var bgCv = null, diskCv = null, diskGlowCv = null, holeCv = null;
+var diskSpan = 0, holeSpan = 0;
+
+function makeCanvas(w, h) {
+  var c = document.createElement('canvas');
+  c.width  = Math.max(1, Math.ceil(w));
+  c.height = Math.max(1, Math.ceil(h));
+  return c;
+}
+
+/* ================= 预渲染：星空背景 ================= */
+function buildBg() {
+  var c = makeCanvas(W * DPR, H * DPR);
+  var g = c.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  g.fillStyle = '#03020a';
+  g.fillRect(0, 0, W, H);
+
+  var rg = g.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.8);
+  rg.addColorStop(0,    '#170b2e');
+  rg.addColorStop(0.35, '#0a0518');
+  rg.addColorStop(1,    '#02010a');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, W, H);
+
+  var n = Math.round((W * H) / 7000);
+  for (var i = 0; i < n; i++) {
+    var x = Math.random() * W;
+    var y = Math.random() * H;
+    var r = Math.random() * Math.random() * 1.6 + 0.25;
+    var a = 0.10 + Math.random() * 0.55;
+    var w = Math.random();
+    g.fillStyle = 'rgba(' + (200 + w * 55 | 0) + ',' + (215 + (1 - w) * 40 | 0) + ',255,' + a.toFixed(3) + ')';
+    g.beginPath();
+    g.arc(x, y, r, 0, TAU);
+    g.fill();
+  }
+  bgCv = c;
+}
+
+/* ================= 预渲染：彩色吸积盘 ================= */
+function buildDisk() {
+  var SS = 2;                       // 超采样
+  diskSpan = diskR * 2.5;           // sprite 边长（CSS px）
+  var half = diskSpan / 2;
+
+  var c = makeCanvas(diskSpan * SS, diskSpan * SS);
+  var g = c.getContext('2d');
+  g.setTransform(SS, 0, 0, SS, half * SS, half * SS);
+
+  var RINGS = 16, SEGS = 84;
+  var rIn = diskR * 0.34, rOut = diskR * 1.0;
+  var lw = (rOut - rIn) / RINGS * 2.05;
+
+  g.lineCap = 'butt';
+  for (var i = 0; i < RINGS; i++) {
+    var t  = i / (RINGS - 1);
+    var rr = rIn + (rOut - rIn) * t;
+    for (var s = 0; s < SEGS; s++) {
+      var a0 = (s / SEGS) * TAU;
+      var a1 = a0 + (TAU / SEGS) * 1.7;
+      var adeg = a0 * 57.2958;
+
+      var hue   = (adeg * 1.15 + i * 21 + 185) % 360;
+      var light = 46 + 22 * Math.sin(a0 * 3.1 + i * 1.7);
+      var alpha = clamp(0.42 + 0.48 * Math.sin(a0 * 5.3 - i * 0.9), 0.05, 0.95);
+
+      g.strokeStyle = 'hsla(' + hue.toFixed(0) + ',100%,' + light.toFixed(0) + '%,' + alpha.toFixed(2) + ')';
+      g.lineWidth = lw;
+      g.beginPath();
+      g.arc(0, 0, rr, a0, a1);
+      g.stroke();
+    }
+  }
+
+  // 径向遮罩：内外边缘淡出
+  g.globalCompositeOperation = 'destination-in';
+  var mg = g.createRadialGradient(0, 0, rIn * 0.55, 0, 0, rOut * 1.05);
+  mg.addColorStop(0,    'rgba(0,0,0,0)');
+  mg.addColorStop(0.10, 'rgba(0,0,0,0.85)');
+  mg.addColorStop(0.62, 'rgba(0,0,0,1)');
+  mg.addColorStop(1,    'rgba(0,0,0,0)');
+  g.fillStyle = mg;
+  g.fillRect(-half, -half, diskSpan, diskSpan);
+
+  diskCv = c;
+  diskGlowCv = blurred(c, 22);
+}
+
+function blurred(src, px) {
+  var c = makeCanvas(src.width, src.height);
+  var g = c.getContext('2d');
+  try { if ('filter' in g) g.filter = 'blur(' + px + 'px)'; } catch (e) {}
+  g.drawImage(src, 0, 0);
+  return c;
+}
+
+/* ================= 预渲染：黑洞核心 + 光子环 ================= */
+function buildHole() {
+  var SS = 2;
+  holeSpan = coreR * 4.6;
+  var half = holeSpan / 2;
+
+  var c = makeCanvas(holeSpan * SS, holeSpan * SS);
+  var g = c.getContext('2d');
+  g.setTransform(SS, 0, 0, SS, half * SS, half * SS);
+
+  // 引力透镜亮环
+  var rg = g.createRadialGradient(0, 0, coreR * 0.93, 0, 0, coreR * 1.95);
+  rg.addColorStop(0,    'rgba(255,255,255,0.98)');
+  rg.addColorStop(0.05, 'rgba(200,230,255,0.62)');
+  rg.addColorStop(0.22, 'rgba(130,160,255,0.22)');
+  rg.addColorStop(0.55, 'rgba(95,45,210,0.07)');
+  rg.addColorStop(1,    'rgba(0,0,0,0)');
+  g.fillStyle = rg;
+  g.beginPath();
+  g.arc(0, 0, coreR * 1.95, 0, TAU);
+  g.fill();
+
+  // 绝对的“黑”
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = '#000';
+  g.beginPath();
+  g.arc(0, 0, coreR, 0, TAU);
+  g.fill();
+
+  holeCv = c;
+}
+
+/* ================= 粒子数据 ================= */
+var strokes = [];      // { pts: [particle], hue }
+var free    = [];      // 被吞噬后螺旋坠落的粒子
+var dust    = [];      // 环境浮尘
+var totalPts = 0;
+var MAXPTS = 5200;
+
+function pushParticle(s, x, y) {
+  var pts = s.pts;
+  var rest = 4;
+  if (pts.length) {
+    var p0 = pts[pts.length - 1];
+    var dx = x - p0.x, dy = y - p0.y;
+    rest = Math.max(1.2, Math.sqrt(dx * dx + dy * dy));
+  }
+  pts.push({
+    x: x, y: y, vx: 0, vy: 0,
+    hue: (s.hue + pts.length * 2.4) % 360,
+    rest: Math.min(rest, 40),
+    dead: false
+  });
+  totalPts++;
+
+  if (totalPts > MAXPTS && strokes.length > 1 && strokes[0] !== s) {
+    totalPts -= strokes.shift().pts.length;
+  }
+}
+
+function spawnFree(x, y, d, hue) {
+  if (free.length > 560) free.shift();
+  free.push({
+    r: d,
+    ang: Math.atan2(y - cy, x - cx),
+    dir: Math.random() < 0.82 ? 1 : -1,
+    vr: 60, w: 3,
+    x: x, y: y, px: x, py: y,
+    hue: hue
+  });
+  // 偶尔爆出火花
+  if (Math.random() < 0.35 && free.length < 560) {
+    free.push({
+      r: d * rand(0.85, 1.15),
+      ang: Math.atan2(y - cy, x - cx) + rand(-0.25, 0.25),
+      dir: Math.random() < 0.5 ? 1 : -1,
+      vr: 60, w: 3,
+      x: x + rand(-6, 6), y: y + rand(-6, 6),
+      px: x, py: y,
+      hue: hue
+    });
+  }
+}
+
+function initDust() {
+  dust.length = 0;
+  var n = Math.round(clamp(Math.min(W, H) / 12, 26, 72));
+  for (var i = 0; i < n; i++) {
+    dust.push({
+      r: rand(coreR * 1.7, Math.max(W, H) * 0.62),
+      ang: Math.random() * TAU,
+      w: rand(0.12, 0.5) * (Math.random() < 0.85 ? 1 : -1),
+      vr: rand(3, 12),
+      s: rand(0.5, 1.6),
+      x: 0, y: 0
+    });
+  }
+}
+
+/* ================= 布局 / 初始化 ================= */
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.round(window.innerWidth);
+  H = Math.round(window.innerHeight);
+
+  cv.width  = Math.round(W * DPR);
+  cv.height = Math.round(H * DPR);
+  cv.style.width  = W + 'px';
+  cv.style.height = H + 'px';
+
+  cx = W / 2;
+  cy = H / 2;
+  coreR   = Math.min(W, H) * 0.105;
+  diskR   = coreR * 2.95;
+  absorbR = coreR * 1.85;
+
+  buildBg();
+  buildDisk();
+  buildHole();
+  initDust();
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
+/* ================= 物理 ================= */
+var G = 52000, SOFT = 95, SWIRL = 0.85, MAXV = 760;
+
+function physics(dt) {
+  var damp = Math.pow(0.996, dt * 60);
+
+  /* ---- 涂鸦粒子 ---- */
+  for (var si = strokes.length - 1; si >= 0; si--) {
+    var s = strokes[si];
+    var pts = s.pts;
+    var alive = 0;
+
+    // 引力 + 切向拖曳
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (p.dead) continue;
+
+      var dx = cx - p.x, dy = cy - p.y;
+      var d = Math.sqrt(dx * dx + dy * dy) + 0.0001;
+
+      if (d < absorbR) {                 // 越过最内稳定轨道 → 被吞噬
+        p.dead = true;
+        spawnFree(p.x, p.y, d, p.hue);
+        continue;
+      }
+      alive++;
+
+      var ux = dx / d, uy = dy / d;
+      var a  = G / (d + SOFT);
+
+      p.vx = (p.vx + (ux * a - uy * a * SWIRL) * dt) * damp;
+      p.vy = (p.vy + (uy * a + ux * a * SWIRL) * dt) * damp;
+    }
+
+    // 弹簧约束（拉长时更硬，压缩时较软）
+    for (var j = 1; j < pts.length; j++) {
+      var pa = pts[j - 1], pb = pts[j];
+      if (pa.dead || pb.dead) continue;
+
+      var ex = pb.x - pa.x, ey = pb.y - pa.y;
+      var ed = Math.sqrt(ex * ex + ey * ey) || 0.001;
+      var diff = ed - pb.rest;
+      var stiff = diff > 0 ? 32 : 12;
+      var f = clamp(diff * stiff, -1400, 1400) * dt;
+      var eux = ex / ed, euy = ey / ed;
+
+      pa.vx += eux * f; pa.vy += euy * f;
+      pb.vx -= eux * f; pb.vy -= euy * f;
+    }
+
+    // 积分 + 限速
+    for (var k = 0; k < pts.length; k++) {
+      var q = pts[k];
+      if (q.dead) continue;
+      var sp = Math.hypot(q.vx, q.vy);
+      if (sp > MAXV) { var sc = MAXV / sp; q.vx *= sc; q.vy *= sc; }
+      q.x += q.vx * dt;
+      q.y += q.vy * dt;
+    }
+
+    if (alive === 0) {
+      totalPts -= pts.length;
+      strokes.splice(si, 1);
+    }
+  }
+
+  /* ---- 螺旋坠落粒子（极坐标，绝对稳定） ---- */
+  for (var m = free.length - 1; m >= 0; m--) {
+    var fr = free[m];
+    fr.vr = 52 * Math.pow(absorbR / (fr.r + 10), 0.8);
+    fr.w  = 3.1 * Math.sqrt(absorbR / (fr.r + 8)) * fr.dir;
+
+    fr.r   -= fr.vr * dt;
+    fr.ang += fr.w * dt;
+    fr.px = fr.x; fr.py = fr.y;
+    fr.x = cx + Math.cos(fr.ang) * fr.r;
+    fr.y = cy + Math.sin(fr.ang) * fr.r;
+
+    if (fr.r < coreR * 0.8) free.splice(m, 1);
+  }
+
+  /* ---- 环境浮尘 ---- */
+  for (var n = 0; n < dust.length; n++) {
+    var du = dust[n];
+    du.ang += du.w * dt;
+    du.r   -= du.vr * dt;
+    if (du.r < coreR * 1.05) {
+      du.r   = Math.max(W, H) * rand(0.5, 0.68);
+      du.ang = Math.random() * TAU;
+    }
+    du.x = cx + Math.cos(du.ang) * du.r;
+    du.y = cy + Math.sin(du.ang) * du.r;
+  }
+}
+
+/* ================= 渲染 ================= */
+var BUCKETS = 12;
+var buckets = [];
+for (var bi = 0; bi < BUCKETS; bi++) buckets.push([]);
+var hot = [];
+
+function addSeg(g, p, k) {
+  var tx = p.x - p.vx * k;
+  var ty = p.y - p.vy * k;
+  var mx = p.x - tx, my = p.y - ty;
+  if (mx * mx + my * my < 0.36) {   // 太短就用最小圆点，保证慢速时也可见
+    g.moveTo(p.x - 0.6, p.y - 0.6);
+    g.lineTo(p.x, p.y);
+  } else {
+    g.moveTo(tx, ty);
+    g.lineTo(p.x, p.y);
+  }
+}
+
+function drawSprite(img, x, y, size, rot, alpha) {
+  var h = size * 0.5;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.drawImage(img, -h, -h, size, size);
+  ctx.restore();
+}
+
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(bgCv, 0, 0, W, H);
+
+  var rot = tSec * 0.22;   // 缓慢旋转
+
+  ctx.globalCompositeOperation = 'lighter';
+  drawSprite(diskGlowCv, cx, cy, diskSpan, rot * 0.6, 0.8);
+  drawSprite(diskCv,     cx, cy, diskSpan, rot,       1.0);
+
+  /* 收集涂鸦粒子 */
+  for (var b = 0; b < BUCKETS; b++) buckets[b].length = 0;
+  hot.length = 0;
+
+  var hotR = coreR * 3.2;
+  var hotR2 = hotR * hotR;
+
+  for (var si = 0; si < strokes.length; si++) {
+    var pts = strokes[si].pts;
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (p.dead) continue;
+      buckets[((p.hue / 30) | 0) % BUCKETS].push(p);
+      var dx = p.x - cx, dy = p.y - cy;
+      if (dx * dx + dy * dy < hotR2) hot.push(p);
+    }
+  }
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // 按色相分组批量描边（12 次 stroke 搞定几千粒子）
+  for (var c2 = 0; c2 < BUCKETS; c2++) {
+    var arr = buckets[c2];
+    if (arr.length === 0) continue;
+    ctx.beginPath();
+    for (var j = 0; j < arr.length; j++) addSeg(ctx, arr[j], 0.022);
+    ctx.strokeStyle = 'hsla(' + (c2 * 30 + 12) + ',100%,64%,0.78)';
+    ctx.lineWidth = 2.6;
+    ctx.stroke();
+  }
+
+  // 靠近黑洞的部分整体高亮 → 辉光
+  if (hot.length) {
+    ctx.beginPath();
+    for (var h2 = 0; h2 < hot.length; h2++) addSeg(ctx, hot[h2], 0.036);
+    ctx.strokeStyle = 'rgba(255,235,205,0.20)';
+    ctx.lineWidth = 7;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+  }
+
+  /* 被吞噬后的粒子流 */
+  if (free.length) {
+    ctx.beginPath();
+    for (var f2 = 0; f2 < free.length; f2++) {
+      var fr = free[f2];
+      ctx.moveTo(fr.px, fr.py);
+      ctx.lineTo(fr.x, fr.y);
+    }
+    ctx.strokeStyle = 'rgba(255,105,215,0.38)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,250,255,0.95)';
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+  }
+
+  /* 环境浮尘 */
+  if (dust.length) {
+    ctx.beginPath();
+    for (var d2 = 0; d2 < dust.length; d2++) {
+      var du = dust[d2];
+      ctx.moveTo(du.x, du.y);
+      ctx.arc(du.x, du.y, du.s, 0, TAU);
+    }
+    ctx.fillStyle = 'rgba(175,195,255,0.5)';
+    ctx.fill();
+  }
+
+  /* 黑洞核心盖在最上层 → 粒子被“吞掉” */
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.drawImage(holeCv, cx - holeSpan / 2, cy - holeSpan / 2, holeSpan, holeSpan);
+}
+
+/* ================= 输入（多点触控） ================= */
+var active = new Map();
+var hueClock = Math.random() * 360;
+var MIN_STEP = 3;
+
+function addPoint(rec, x, y) {
+  var s = rec.s, pts = s.pts;
+  if (pts.length === 0) { pushParticle(s, x, y); return; }
+  if (pts.length > 2600) return;
+
+  var last = pts[pts.length - 1];
+  var dx = x - last.x, dy = y - last.y;
+  var d = Math.sqrt(dx * dx + dy * dy);
+  if (d < MIN_STEP) return;
+
+  var n = Math.min(30, Math.ceil(d / MIN_STEP));
+  for (var i = 1; i <= n; i++) {
+    var t = i / n;
+    pushParticle(s, last.x + dx * t, last.y + dy * t);
+  }
+}
+
+function hideHint() {
+  if (hint && !hint.classList.contains('off')) hint.classList.add('off');
+}
+
+cv.addEventListener('pointerdown', function (e) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  e.preventDefault();
+  hideHint();
+  try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+
+  hueClock = (hueClock + 47 + Math.random() * 20) % 360;
+  var s = { pts: [], hue: hueClock };
+  strokes.push(s);
+
+  active.set(e.pointerId, { s: s });
+  pushParticle(s, e.clientX, e.clientY);
+}, { passive: false });
+
+cv.addEventListener('pointermove', function (e) {
+  var rec = active.get(e.pointerId);
+  if (!rec) return;
+  e.preventDefault();
+
+  var list = null;
+  if (e.getCoalescedEvents) {
+    try { list = e.getCoalescedEvents(); } catch (err) { list = null; }
+  }
+  if (!list || list.length === 0) list = [e];
+
+  for (var i = 0; i < list.length; i++) {
+    addPoint(rec, list[i].clientX, list[i].clientY);
+  }
+}, { passive: false });
+
+function endStroke(e) {
+  var rec = active.get(e.pointerId);
+  if (!rec) return;
+  active.delete(e.pointerId);
+  try { cv.releasePointerCapture(e.pointerId); } catch (err) {}
+
+  var pts = rec.s.pts;
+  if (pts.length) {
+    var last = pts[pts.length - 1];
+    var dx = e.clientX - last.x, dy = e.clientY - last.y;
+    if (dx * dx + dy * dy > 1.5) pushParticle(rec.s, e.clientX, e.clientY);
+  }
+}
+
+cv.addEventListener('pointerup', endStroke, { passive: false });
+cv.addEventListener('pointercancel', endStroke, { passive: false });
+
+// 兜底：彻底禁掉滚动 / 缩放
+document.addEventListener('touchmove', function (e) {
+  if (e.cancelable) e.preventDefault();
+}, { passive: false });
+document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+/* ================= 主循环 ================= */
+var STEP = 1 / 60;
+var acc = 0, tSec = 0, lastT = 0;
+
+function loop(now) {
+  requestAnimationFrame(loop);
+
+  if (!lastT) lastT = now;
+  var dt = (now - lastT) / 1000;
+  lastT = now;
+  if (dt > 0.25) dt = 0.25;
+  tSec += dt;
+
+  acc += dt;
+  var steps = 0;
+  while (acc >= STEP && steps < 4) { physics(STEP); acc -= STEP; steps++; }
+  if (steps === 4) acc = 0;
+
+  render();
+}
+
+/* ================= 启动 ================= */
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function () {
+  setTimeout(resize, 120);
+});
+
+resize();
+requestAnimationFrame(loop);
+
+setTimeout(hideHint, 7000);
+
+})();
+</script>
+</body>
+</html>

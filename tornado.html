@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#04050c">
+<title>赛博龙卷风 · CYBER VORTEX</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{
+    width:100%;height:100%;overflow:hidden;background:#04050c;
+    -webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    overscroll-behavior:none;
+    touch-action:none;
+  }
+  body{position:fixed;inset:0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Courier New",monospace;}
+  #app{position:fixed;inset:0;overflow:hidden;touch-action:none;}
+  canvas{display:block;width:100%;height:100%;touch-action:none;}
+  #hud{
+    position:fixed;inset:0;pointer-events:none;
+    display:flex;flex-direction:column;justify-content:space-between;
+    padding:calc(12px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));
+  }
+  .top{display:flex;justify-content:space-between;align-items:flex-start;}
+  .label{font-size:10px;letter-spacing:3px;color:rgba(120,210,255,.55);}
+  .val{
+    font-size:clamp(26px,8vw,40px);line-height:1.05;font-weight:700;color:#eafcff;
+    text-shadow:0 0 10px rgba(80,240,255,.9),0 0 34px rgba(60,180,255,.5);
+    font-variant-numeric:tabular-nums;
+  }
+  .combo{
+    font-size:clamp(18px,5.5vw,26px);font-weight:700;color:#ff9df3;opacity:.28;
+    text-shadow:0 0 12px rgba(255,90,230,.9),0 0 30px rgba(180,60,255,.6);
+    transform-origin:right center;will-change:transform;
+  }
+  .hint{
+    text-align:center;font-size:12px;letter-spacing:2px;color:rgba(150,225,255,.75);
+    text-shadow:0 0 12px rgba(80,220,255,.5);
+    transition:opacity .5s ease;animation:breathe 2.4s ease-in-out infinite;
+  }
+  .hint.hide{opacity:0;animation:none;}
+  @keyframes breathe{0%,100%{opacity:.4}50%{opacity:1}}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="c"></canvas>
+  <div id="hud">
+    <div class="top">
+      <div>
+        <div class="label">SCORE</div>
+        <div class="val" id="scoreEl">0</div>
+      </div>
+      <div class="combo" id="comboEl">x1</div>
+    </div>
+    <div class="hint" id="hintEl">滑动屏幕 · 召唤赛博龙卷风</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 基础工具 ================= */
+  const TAU = Math.PI * 2;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const rndi = (a, b) => (a + Math.random() * (b - a + 1)) | 0;
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+  /* ================= 画布 ================= */
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+
+  let W = 1, H = 1, DPR = 1, S = 1, TORNADO_R = 96, bgGrad = null;
+  let time = 0;
+
+  function resize() {
+    W = Math.max(1, window.innerWidth);
+    H = Math.max(1, window.innerHeight);
+
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const maxPx = 2400000;                                  // 像素预算，防止高分屏拖垮帧率
+    if (W * H * dpr * dpr > maxPx) dpr = Math.max(1, Math.sqrt(maxPx / (W * H)));
+    DPR = dpr;
+
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#04050c');
+    bgGrad.addColorStop(0.5, '#070a17');
+    bgGrad.addColorStop(1, '#0c0722');
+
+    S = clamp(Math.min(W, H) / 420, 0.75, 1.7);             // 统一缩放系数
+    TORNADO_R = clamp(Math.min(W, H) * 0.22, 78, 160);
+  }
+
+  /* ================= 预渲染光斑贴图（性能关键） ================= */
+  const HUE_BUCKETS = 36;
+  const glowSprites = [];
+  let whiteSprite = null;
+
+  function buildSprites() {
+    const size = 64, half = size / 2;
+    for (let i = 0; i < HUE_BUCKETS; i++) {
+      const h = i * (360 / HUE_BUCKETS);
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const g = c.getContext('2d');
+      const grd = g.createRadialGradient(half, half, 0, half, half, half);
+      grd.addColorStop(0.00, 'hsla(' + h + ',100%,92%,1)');
+      grd.addColorStop(0.18, 'hsla(' + h + ',100%,74%,0.90)');
+      grd.addColorStop(0.45, 'hsla(' + h + ',100%,60%,0.30)');
+      grd.addColorStop(1.00, 'hsla(' + h + ',100%,55%,0)');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, size, size);
+      glowSprites.push(c);
+    }
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    const grd = g.createRadialGradient(half, half, 0, half, half, half);
+    grd.addColorStop(0.00, 'rgba(255,255,255,1)');
+    grd.addColorStop(0.20, 'rgba(215,247,255,0.85)');
+    grd.addColorStop(0.50, 'rgba(140,230,255,0.25)');
+    grd.addColorStop(1.00, 'rgba(120,220,255,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, size, size);
+    whiteSprite = c;
+  }
+
+  /* ================= 粒子池 ================= */
+  const MAXP = 1300;
+  const parts = new Array(MAXP);
+  for (let i = 0; i < MAXP; i++) {
+    parts[i] = { life: 0, max: 1, x: 0, y: 0, vx: 0, vy: 0, size: 1, drag: 2, grav: 0, img: null };
+  }
+  let pCursor = 0;
+
+  function emit(x, y, vx, vy, life, size, hue, drag, grav, hot) {
+    let p = null;
+    for (let n = 0; n < 20; n++) {
+      pCursor = (pCursor + 1) % MAXP;
+      if (parts[pCursor].life <= 0) { p = parts[pCursor]; break; }
+    }
+    if (!p) p = parts[pCursor];        // 全满则覆写最旧的一个
+
+    const h = ((hue % 360) + 360) % 360;
+    const idx = Math.round(h / (360 / HUE_BUCKETS)) % HUE_BUCKETS;
+
+    p.x = x; p.y = y; p.vx = vx; p.vy = vy;
+    p.life = life; p.max = life; p.size = size;
+    p.drag = drag; p.grav = grav;
+    p.img = (Math.random() < (hot || 0)) ? whiteSprite : glowSprites[idx];
+    return p;
+  }
+
+  function updateParticles(dt) {
+    for (let i = 0; i < MAXP; i++) {
+      const p = parts[i];
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      if (p.life <= 0) continue;
+      p.vx -= p.vx * p.drag * dt;
+      p.vy -= p.vy * p.drag * dt;
+      p.vy += p.grav * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    }
+  }
+
+  function drawParticles() {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < MAXP; i++) {
+      const p = parts[i];
+      if (p.life <= 0) continue;
+      const k = p.life / p.max;
+      const r = p.size * (0.5 + 0.9 * k) * 3.4;
+      if (r < 0.4) continue;
+      ctx.globalAlpha = Math.min(1, k * 1.6) * 0.85;
+      ctx.drawImage(p.img, p.x - r, p.y - r, r * 2, r * 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ================= 掉落几何体 ================= */
+  const SHAPES = [
+    { n: 4, off: Math.PI / 4 },   // 方块
+    { n: 3, off: -Math.PI / 2 },  // 三角
+    { n: 6, off: 0 },             // 六边
+    { n: 4, off: 0 },             // 菱形
+    { n: 8, off: Math.PI / 8 }    // 八边
+  ];
+  const HUES = [186, 195, 268, 300, 320, 152, 45, 210];
+
+  const objs = [];
+  const objPool = [];
+
+  function spawnObject() {
+    if (objs.length > 90) return;
+    const o = objPool.pop() || {};
+    o.x = rnd(0.06, 0.94) * W;
+    o.y = -rnd(50, 150) * S;
+    o.vx = rnd(-30, 30) * S;
+    o.vy = rnd(70, 150) * S * (0.75 + Math.min(time, 90) * 0.006);
+    o.size = rnd(14, 34) * S;
+    o.rot = rnd(0, TAU);
+    o.vr = rnd(-2.2, 2.2);
+    o.hue = HUES[rndi(0, HUES.length - 1)] + rnd(-12, 12);
+    o.shape = rndi(0, SHAPES.length - 1);
+    o.shred = 0;
+    o.scale = 1;
+    o.spark = 0;
+    o.tnx = 0; o.tny = 0;
+    objs.push(o);
+  }
+
+  function removeObj(i) {
+    const o = objs[i];
+    objs.splice(i, 1);
+    if (objPool.length < 120) objPool.push(o);
+  }
+
+  function updateObjects(dt) {
+    const g = 210 * S;
+
+    for (let i = objs.length - 1; i >= 0; i--) {
+      const o = objs[i];
+      let caught = false;
+
+      /* —— 龙卷风吸力 / 旋转 / 撕碎 —— */
+      for (const t of tornadoes.values()) {
+        const dx = o.x - t.x, dy = o.y - t.y;
+        const R = t.radius;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > R * R) continue;
+
+        const d = Math.sqrt(d2) || 0.001;
+        const f = 1 - d / R;                 // 中心 1 → 边缘 0
+        const nx = dx / d, ny = dy / d;
+
+        const spin = 2400 * S * (0.3 + f);   // 切向转速
+        const pull = 950 * S * f;            // 向心吸力
+
+        o.vx += (-ny * spin - nx * pull) * dt + t.vx * 2.5 * dt;
+        o.vy += (nx * spin - ny * pull) * dt + t.vy * 2.5 * dt;
+
+        const dg = 1 - Math.min(0.85, 5 * f * dt);   // 捕获时的阻尼 → 形成螺旋
+        o.vx *= dg; o.vy *= dg;
+
+        o.vr += f * 16 * dt;
+        o.shred += dt * (0.8 + 3.4 * f);
+        o.scale = Math.max(0.12, 1 - o.shred * 0.62);
+        o.nx = nx; o.ny = ny;
+        o.tnx = -ny; o.tny = nx;
+        caught = true;
+
+        // 表面剥落的火花
+        o.spark += dt * (7 + 34 * f);
+        while (o.spark >= 1) {
+          o.spark -= 1;
+          const a = rnd(0, TAU), rr = o.size * o.scale * 0.9;
+          emit(o.x + Math.cos(a) * rr, o.y + Math.sin(a) * rr,
+               -Math.sin(a) * rnd(90, 280) * S - nx * 70,
+               Math.cos(a) * rnd(90, 280) * S - ny * 70,
+               rnd(0.25, 0.7), rnd(0.9, 2.2) * S,
+               o.hue + rnd(-25, 25), 2.4, -40, 0.3);
+        }
+      }
+
+      if (!caught && o.shred > 0) {          // 脱离后缓慢恢复
+        o.shred = Math.max(0, o.shred - dt * 0.5);
+        o.scale = Math.max(0.12, 1 - o.shred * 0.62);
+      }
+
+      if (o.shred >= 1) { explode(o); removeObj(i); continue; }
+
+      o.vy += g * dt;
+      o.vx -= o.vx * 0.15 * dt;
+      o.x += o.vx * dt;
+      o.y += o.vy * dt;
+      o.rot += o.vr * dt;
+
+      if (o.y > H + 90 * S || o.x < -160 * S || o.x > W + 160 * S) removeObj(i);
+    }
+  }
+
+  function explode(o) {
+    const n = clamp(Math.round(o.size * 1.1), 10, 30);
+    const tAng = rnd(120, 340) * S;
+
+    for (let i = 0; i < n; i++) {
+      const a = rnd(0, TAU);
+      const sp = rnd(70, 400) * S;
+      emit(o.x, o.y,
+           Math.cos(a) * sp + (o.tnx || 0) * tAng,
+           Math.sin(a) * sp + (o.tny || 0) * tAng,
+           rnd(0.3, 0.95), rnd(1.2, 3.4) * S,
+           o.hue + rnd(-30, 30), 1.8, 30, 0.22);
+    }
+    emit(o.x, o.y, 0, 0, 0.2, o.size * 0.8, o.hue, 0, 0, 1);  // 核心闪白
+
+    score += Math.round(10 * combo);
+    combo = Math.min(combo + 1, 40);
+    comboTimer = 1.6;
+    comboPulse = 1;
+    shake = Math.min(shake + 3 + o.size * 0.1, 12);
+  }
+
+  function drawObject(o) {
+    const s = o.size * o.scale;
+    if (s < 1.2) return;
+    const shape = SHAPES[o.shape];
+    const hot = o.shred;
+    const hue = o.hue;
+    const light = 62 + hot * 30;
+
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.rot);
+    ctx.beginPath();
+    for (let i = 0; i < shape.n; i++) {
+      const a = shape.off + (i / shape.n) * TAU;
+      const px = Math.cos(a) * s, py = Math.sin(a) * s;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    ctx.fillStyle = 'hsla(' + hue + ',100%,' + light + '%,' + (0.10 + hot * 0.25) + ')';
+    ctx.fill();
+
+    ctx.lineWidth = Math.max(1.2, 2.0 * S);
+    ctx.strokeStyle = 'hsla(' + hue + ',100%,' + Math.min(96, light + 18) + '%,0.95)';
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.30 + hot * 0.4;                 // 外发光描边
+    ctx.lineWidth = Math.max(4, 9 * S);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /* ================= 赛博龙卷风 ================= */
+  const tornadoes = new Map();
+
+  function addTornado(id, x, y) {
+    const t = {
+      id: id, x: x, y: y, vx: 0, vy: 0,
+      age: 0, seed: rnd(0, 10), lastMs: 0,
+      hue: 188 + rnd(-25, 25),
+      radius: TORNADO_R,
+      hist: [{ x: x, y: y, t: time }]
+    };
+    tornadoes.set(id, t);
+    ripples.push({ x: x, y: y, r: 8 * S, life: 1 });
+    return t;
+  }
+
+  function drawTornado(t) {
+    const R = t.radius, hist = t.hist, n = hist.length;
+    const hue = (t.hue + Math.sin(time * 2.2 + t.seed) * 28 + 360) % 360;
+    const spr = glowSprites[Math.round(hue / 10) % HUE_BUCKETS];
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    /* 拖尾光晕 */
+    for (let i = 0; i < n; i++) {
+      const p = hist[i];
+      const f = (i + 1) / n;
+      const a = 1 - (time - p.t) / 0.26;
+      if (a <= 0) continue;
+      const r = R * (0.26 + 0.5 * f) * (0.55 + 0.45 * a);
+      ctx.globalAlpha = a * a * 0.30 * f;
+      ctx.drawImage(spr, p.x - r, p.y - r, r * 2, r * 2);
+    }
+
+    /* 旋转气流弧线 */
+    const tsec = time;
+    for (let k = 0; k < 4; k++) {
+      const ph = tsec * 2.6 + k * 1.55;
+      const rr = R * (0.34 + k * 0.17);
+      const h2 = (hue + k * 26) % 360;
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'hsla(' + h2 + ',100%,72%,' + (0.6 - k * 0.1) + ')';
+      ctx.lineWidth = Math.max(1.2, (3.4 - k * 0.5) * S);
+      ctx.beginPath();
+      ctx.ellipse(t.x, t.y, rr, rr * 0.72, ph, ph * 0.6, ph * 0.6 + Math.PI * 1.25);
+      ctx.stroke();
+    }
+
+    /* 放射状撕裂电光 */
+    ctx.lineWidth = Math.max(1, 1.8 * S);
+    for (let k = 0; k < 6; k++) {
+      const a2 = time * 3.4 + k * 1.047;
+      const r0 = R * 0.35;
+      const r1 = R * (0.85 + 0.2 * Math.sin(time * 6 + k));
+      ctx.strokeStyle = 'hsla(' + ((hue + 40 + k * 12) % 360) + ',100%,80%,0.22)';
+      ctx.beginPath();
+      ctx.moveTo(t.x + Math.cos(a2) * r0, t.y + Math.sin(a2) * r0 * 0.75);
+      ctx.lineTo(t.x + Math.cos(a2) * r1, t.y + Math.sin(a2) * r1 * 0.75);
+      ctx.stroke();
+    }
+
+    /* 高温核心 */
+    const cr = R * 0.30 * (1 + Math.sin(time * 12 + t.seed) * 0.06);
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(whiteSprite, t.x - cr, t.y - cr, cr * 2, cr * 2);
+    ctx.globalAlpha = 1;
+  }
+
+  /* ================= 冲击波 ================= */
+  const ripples = [];
+
+  /* ================= 输入 ================= */
+  const hintEl = document.getElementById('hintEl');
+  let hintHidden = false;
+
+  canvas.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    addTornado(e.pointerId, e.clientX, e.clientY);
+    if (!hintHidden) { hintHidden = true; hintEl.classList.add('hide'); }
+  }, { passive: false });
+
+  canvas.addEventListener('pointermove', function (e) {
+    const t = tornadoes.get(e.pointerId);
+    if (!t) return;
+    e.preventDefault();
+
+    const now = performance.now();
+    const dtm = Math.max(8, now - (t.lastMs || now - 16));
+    t.lastMs = now;
+
+    const x = e.clientX, y = e.clientY;
+    const dx = x - t.x, dy = y - t.y;
+
+    t.vx = clamp((dx / dtm) * 1000, -3200, 3200);
+    t.vy = clamp((dy / dtm) * 1000, -3200, 3200);
+    t.x = x; t.y = y;                 // 直接赋值 → 零延迟跟手
+
+    if (dx * dx + dy * dy > 4) {
+      t.hist.push({ x: x, y: y, t: time });
+      if (t.hist.length > 24) t.hist.shift();
+    }
+  }, { passive: false });
+
+  function endPointer(e) {
+    const t = tornadoes.get(e.pointerId);
+    if (!t) return;
+    ripples.push({ x: t.x, y: t.y, r: t.radius * 0.5, life: 0.8 });
+    tornadoes.delete(e.pointerId);
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  document.addEventListener('touchmove', function (e) {
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  /* ================= 状态 ================= */
+  let score = 0, shown = 0, combo = 1, comboTimer = 0, comboPulse = 0, shake = 0;
+  let spawnTimer = 0, lastMs = 0;
+
+  const scoreEl = document.getElementById('scoreEl');
+  const comboEl = document.getElementById('comboEl');
+  let lastScoreStr = '';
+
+  /* ================= 更新 ================= */
+  function update(dt) {
+    time += dt;
+
+    /* 生成 */
+    const interval = Math.max(0.14, 0.66 - time * 0.010);
+    spawnTimer -= dt;
+    let guard = 0;
+    while (spawnTimer <= 0 && guard++ < 5) {
+      spawnTimer += interval * rnd(0.65, 1.35);
+      spawnObject();
+    }
+
+    /* 龙卷风 */
+    for (const t of tornadoes.values()) {
+      t.age += dt;
+      t.vx *= 1 - Math.min(0.9, 9 * dt);
+      t.vy *= 1 - Math.min(0.9, 9 * dt);
+      while (t.hist.length && time - t.hist[0].t > 0.24) t.hist.shift();
+
+      for (let i = 0; i < 3; i++) {           // 常驻环绕火花
+        const a = rnd(0, TAU), rr = t.radius * rnd(0.2, 0.95), sp = rnd(140, 400) * S;
+        emit(t.x + Math.cos(a) * rr, t.y + Math.sin(a) * rr * 0.8,
+             -Math.sin(a) * sp + t.vx * 0.2, Math.cos(a) * sp + t.vy * 0.2,
+             rnd(0.22, 0.6), rnd(1.1, 2.8) * S, t.hue + rnd(-22, 22),
+             1.5, -55, 0.28);
+      }
+    }
+
+    /* 冲击波 */
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const r = ripples[i];
+      r.r += 520 * S * dt;
+      r.life -= dt * 2.4;
+      if (r.life <= 0) ripples.splice(i, 1);
+    }
+
+    updateObjects(dt);
+    updateParticles(dt);
+
+    /* 连击与分数 */
+    if (comboTimer > 0) {
+      comboTimer -= dt;
+      if (comboTimer <= 0) combo = 1;
+    }
+    comboPulse = Math.max(0, comboPulse - dt * 4.5);
+    shake *= 1 - Math.min(1, 6 * dt);
+
+    shown += (score - shown) * Math.min(1, dt * 12);
+    if (Math.abs(score - shown) < 0.6) shown = score;
+  }
+
+  /* ================= 渲染 ================= */
+  function drawGrid() {
+    const horizon = H * 0.60;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(64,180,255,0.09)';
+    ctx.beginPath();
+    for (let i = -7; i <= 7; i++) {
+      ctx.moveTo(W / 2 + i * (W * 0.02), horizon);
+      ctx.lineTo(W / 2 + i * (W * 0.26), H + 30);
+    }
+    ctx.stroke();
+
+    const off = (time * 0.45) % 1;
+    ctx.strokeStyle = 'rgba(64,180,255,0.13)';
+    for (let i = 0; i < 9; i++) {
+      const p = (i + off) / 9;
+      const y = horizon + Math.pow(p, 2.4) * (H - horizon + 60);
+      ctx.globalAlpha = p * 0.9;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  function render() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (shake > 0.3) ctx.translate(rnd(-shake, shake), rnd(-shake, shake));
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(-24, -24, W + 48, H + 48);
+
+    drawGrid();
+
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < objs.length; i++) drawObject(objs[i]);
+
+    for (const t of tornadoes.values()) drawTornado(t);
+
+    for (let i = 0; i < ripples.length; i++) {
+      const r = ripples[i];
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'hsla(190,100%,80%,' + (r.life * 0.5) + ')';
+      ctx.lineWidth = 2 * S;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.r, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    drawParticles();
+  }
+
+  function updateHud() {
+    const s = String(Math.round(shown));
+    if (s !== lastScoreStr) { scoreEl.textContent = s; lastScoreStr = s; }
+    comboEl.textContent = 'x' + combo;
+    comboEl.style.opacity = combo > 1 ? '1' : '0.28';
+    comboEl.style.transform = 'scale(' + (1 + comboPulse * 0.32) + ')';
+  }
+
+  /* ================= 主循环 ================= */
+  function frame(ms) {
+    if (!lastMs) lastMs = ms;
+    let dt = (ms - lastMs) / 1000;
+    lastMs = ms;
+    if (dt > 0.05) dt = 0.05;        // 掉帧保护
+    if (dt < 0) dt = 0;
+    update(dt);
+    render();
+    updateHud();
+    requestAnimationFrame(frame);
+  }
+
+  /* ================= 启动 ================= */
+  resize();
+  buildSprites();
+  for (let i = 0; i < 5; i++) spawnObject();
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
+  document.addEventListener('visibilitychange', function () { lastMs = 0; });
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
