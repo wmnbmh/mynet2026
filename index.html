@@ -43,8 +43,7 @@
     touch-action:manipulation;
   }
 
-  body.modal-open{overflow:hidden;}
-
+  /* 科技网格背景 */
   body::before{
     content:"";
     position:fixed;
@@ -59,6 +58,7 @@
     z-index:0;
   }
 
+  /* 光晕 */
   .orb{
     position:fixed;
     border-radius:50%;
@@ -83,6 +83,7 @@
     50%{transform:translate3d(24px,-28px,0) scale(1.08);}
   }
 
+  /* 内容外壳 */
   .shell{
     position:relative;
     z-index:1;
@@ -94,26 +95,28 @@
     align-items:center;
   }
 
+  /* 顶部状态条：居中胶囊 */
   .topbar{
     width:100%;
     display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:14px;
-    flex-wrap:wrap;
-    margin-bottom:24px;
+    justify-content:center;
+    margin-bottom:28px;
   }
 
   .status{
-    display:flex;
+    display:inline-flex;
     align-items:center;
-    gap:10px;
+    gap:9px;
+    padding:7px 16px;
+    border-radius:999px;
+    border:1px solid rgba(0,240,255,.16);
+    background:rgba(0,240,255,.04);
     font-family:"SFMono-Regular",Consolas,monospace;
-    font-size:12px;
-    letter-spacing:.22em;
+    font-size:11.5px;
+    letter-spacing:.2em;
     color:var(--muted);
     text-transform:uppercase;
-    flex-wrap:wrap;
+    white-space:nowrap;
   }
   .dot{
     flex:0 0 auto;
@@ -125,31 +128,7 @@
   }
   @keyframes pulse{50%{opacity:.35;}}
 
-  .btn-new{
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:10px 18px;
-    font-family:inherit;
-    font-size:13px;
-    font-weight:700;
-    letter-spacing:.06em;
-    color:#04121a;
-    border:none;
-    border-radius:999px;
-    cursor:pointer;
-    background:linear-gradient(135deg,#a9f8ff,#00d5ff 45%,#3aa9ff);
-    box-shadow:0 10px 26px -12px rgba(0,213,255,.95),inset 0 1px 0 rgba(255,255,255,.55);
-    transition:transform .25s,box-shadow .25s,filter .25s;
-    white-space:nowrap;
-  }
-  .btn-new:hover{
-    transform:translateY(-2px);
-    filter:brightness(1.06);
-    box-shadow:0 16px 34px -14px rgba(0,213,255,1),inset 0 1px 0 rgba(255,255,255,.6);
-  }
-  .btn-new:active{transform:translateY(0) scale(.98);}
-
+  /* 标题 */
   h1{
     font-size:clamp(2.2rem,7vw,4.4rem);
     font-weight:800;
@@ -215,7 +194,6 @@
     text-align:center;
   }
   .notice.show{display:flex;}
-  .notice b{color:#ffdda8;font-weight:700;}
   .notice button{
     font-family:"SFMono-Regular",Consolas,monospace;
     font-size:11.5px;
@@ -231,6 +209,7 @@
   }
   .notice button:hover{background:rgba(255,181,69,.28);}
 
+  /* 卡片容器 */
   .grid{
     display:flex;
     flex-wrap:wrap;
@@ -240,23 +219,15 @@
     width:100%;
   }
 
-  .card-slot{
-    position:relative;
-    display:flex;
-    flex:1 1 300px;
-    max-width:360px;
-    min-width:0;
-  }
-
+  /* 游戏卡片 */
   .game-card{
     --accent:var(--cyan);
     --accent-soft:rgba(0,240,255,.20);
     --accent-glow:rgba(0,240,255,.38);
 
     position:relative;
-    flex:1 1 auto;
-    width:100%;
-    max-width:none;
+    flex:1 1 300px;
+    max-width:360px;
     min-width:0;
     min-height:232px;
     padding:26px 28px 24px;
@@ -302,6 +273,7 @@
     --accent-glow:rgba(90,120,255,.42);
   }
 
+  /* 扫光 */
   .game-card::before{
     content:"";
     position:absolute;
@@ -313,6 +285,7 @@
   }
   .game-card:hover::before{transform:translateX(120%);}
 
+  /* 四角装饰 */
   .game-card::after{
     content:"";
     position:absolute;
@@ -411,30 +384,7 @@
     stroke-linejoin:round;
   }
 
-  .del-btn{
-    position:absolute;
-    top:-9px;right:-9px;
-    z-index:3;
-    width:27px;height:27px;
-    display:grid;
-    place-items:center;
-    border-radius:50%;
-    cursor:pointer;
-    font-size:12px;
-    line-height:1;
-    color:#ff8098;
-    background:rgba(28,10,18,.9);
-    border:1px solid rgba(255,90,120,.5);
-    box-shadow:0 6px 16px -8px rgba(255,60,100,.9);
-    opacity:0;
-    transform:scale(.85);
-    transition:opacity .25s,transform .25s,background .25s;
-  }
-  .card-slot:hover .del-btn,
-  .card-slot:focus-within .del-btn{opacity:1;transform:scale(1);}
-  .del-btn:hover{background:rgba(255,60,100,.28);}
-  @media (hover:none){ .del-btn{opacity:1;transform:scale(1);} }
-
+  /* 骨架屏 */
   .skeleton{
     flex:1 1 300px;
     max-width:360px;
@@ -457,6 +407,7 @@
     to{transform:translateX(100%);}
   }
 
+  /* 空状态 */
   .state{
     flex:1 1 100%;
     width:100%;
@@ -503,138 +454,20 @@
     text-align:center;
   }
 
-  /* 弹窗 */
-  .modal-mask{
-    position:fixed;
-    inset:0;
-    z-index:50;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:20px;
-    background:rgba(2,5,12,.74);
-    -webkit-backdrop-filter:blur(6px);
-    backdrop-filter:blur(6px);
-    opacity:0;
-    visibility:hidden;
-    transition:opacity .28s ease,visibility .28s;
-  }
-  .modal-mask.show{opacity:1;visibility:visible;}
+  /* ============ 响应式 ============ */
 
-  .modal{
-    width:min(420px,100%);
-    max-height:calc(100svh - 40px);
-    overflow-y:auto;
-    padding:28px 26px 24px;
-    border-radius:18px;
-    background:linear-gradient(155deg,rgba(22,31,52,.98),rgba(9,13,24,.99));
-    border:1px solid rgba(0,240,255,.28);
-    box-shadow:
-      0 40px 80px -30px rgba(0,0,0,.95),
-      0 0 0 1px rgba(0,240,255,.08),
-      0 0 60px -30px rgba(0,240,255,.7);
-    transform:translateY(14px) scale(.97);
-    transition:transform .28s cubic-bezier(.22,1,.36,1);
-  }
-  .modal-mask.show .modal{transform:none;}
-
-  .modal h3{
-    font-size:1.15rem;
-    letter-spacing:.06em;
-    margin-bottom:6px;
-    background:linear-gradient(180deg,#fff,#8ef4ff);
-    -webkit-background-clip:text;
-    background-clip:text;
-    -webkit-text-fill-color:transparent;
-  }
-  .modal-tip{
-    font-size:12px;
-    line-height:1.7;
-    color:var(--muted);
-    margin-bottom:20px;
-  }
-
-  .field{display:block;margin-bottom:16px;}
-  .field span{
-    display:block;
-    margin-bottom:7px;
-    font-family:"SFMono-Regular",Consolas,monospace;
-    font-size:11px;
-    letter-spacing:.18em;
-    color:var(--muted);
-    text-transform:uppercase;
-  }
-  .field input{
-    width:100%;
-    padding:12px 14px;
-    font-family:inherit;
-    font-size:16px;
-    color:var(--text);
-    background:rgba(255,255,255,.04);
-    border:1px solid rgba(0,240,255,.22);
-    border-radius:10px;
-    outline:none;
-    transition:border-color .25s,box-shadow .25s,background .25s;
-    -webkit-appearance:none;
-    appearance:none;
-  }
-  .field input::placeholder{color:rgba(124,141,181,.6);}
-  .field input:focus{
-    border-color:rgba(0,240,255,.75);
-    background:rgba(0,240,255,.05);
-    box-shadow:0 0 0 3px rgba(0,240,255,.12);
-  }
-
-  .modal-err{
-    min-height:18px;
-    margin-bottom:12px;
-    font-size:12px;
-    color:#ff8fa8;
-  }
-
-  .modal-actions{
-    display:flex;
-    justify-content:flex-end;
-    gap:12px;
-  }
-  .modal-actions button{
-    font-family:inherit;
-    font-size:13.5px;
-    font-weight:600;
-    letter-spacing:.06em;
-    padding:11px 22px;
-    border-radius:10px;
-    cursor:pointer;
-    transition:transform .2s,filter .2s,background .2s;
-  }
-  .btn-ghost{
-    color:var(--muted);
-    background:transparent;
-    border:1px solid rgba(124,141,181,.4);
-  }
-  .btn-ghost:hover{color:var(--text);border-color:rgba(124,141,181,.8);}
-  .btn-primary{
-    color:#04121a;
-    border:none;
-    background:linear-gradient(135deg,#a9f8ff,#00d5ff 45%,#3aa9ff);
-    box-shadow:0 10px 26px -12px rgba(0,213,255,.95);
-  }
-  .btn-primary:hover{filter:brightness(1.06);}
-  .modal-actions button:active{transform:scale(.97);}
-
-  /* 响应式 */
   @media (max-width:1024px){
-    .card-slot{flex:1 1 280px;max-width:420px;}
+    .game-card{flex:1 1 280px;max-width:420px;}
     .skeleton{flex:1 1 280px;max-width:420px;}
   }
 
   @media (max-width:860px){
     .grid{gap:20px;}
-    .card-slot{flex:1 1 260px;max-width:340px;}
+    .game-card{flex:1 1 260px;max-width:340px;min-height:220px;padding:24px 24px 22px;}
     .skeleton{flex:1 1 260px;max-width:340px;min-height:220px;}
-    .game-card{min-height:220px;padding:24px 24px 22px;}
   }
 
+  /* 手机单列 */
   @media (max-width:720px){
     body{
       padding-top:calc(var(--safe-top) + 28px);
@@ -645,9 +478,13 @@
     }
     .shell{margin:0;}
 
-    .topbar{margin-bottom:18px;gap:10px;align-items:flex-start;}
-    .status{font-size:10px;letter-spacing:.14em;gap:7px;padding-top:8px;}
-    .btn-new{font-size:12.5px;padding:9px 15px;letter-spacing:.04em;}
+    .topbar{margin-bottom:20px;}
+    .status{
+      font-size:10px;
+      letter-spacing:.14em;
+      padding:6px 13px;
+      gap:7px;
+    }
 
     h1{font-size:clamp(1.95rem,9vw,2.6rem);}
     .subtitle{
@@ -669,13 +506,20 @@
       gap:16px;
     }
 
-    .card-slot{flex:0 0 auto;width:100%;max-width:none;}
-    .skeleton{flex:0 0 auto;width:100%;max-width:none;min-height:170px;}
-
     .game-card{
+      flex:0 0 auto;
+      width:100%;
+      max-width:none;
       min-height:0;
       padding:22px 20px 20px;
       border-radius:16px;
+    }
+
+    .skeleton{
+      flex:0 0 auto;
+      width:100%;
+      max-width:none;
+      min-height:170px;
     }
 
     .card-top{margin-bottom:16px;}
@@ -683,27 +527,23 @@
     .desc{font-size:13px;line-height:1.65;}
     .play{padding-top:18px;font-size:11.5px;letter-spacing:.18em;}
 
-    .del-btn{top:-8px;right:-8px;width:28px;height:28px;}
-
     .state{padding:28px 18px;}
     .state p{font-size:12.5px;}
 
     footer{margin-top:34px;font-size:10.5px;letter-spacing:.12em;padding-bottom:4px;}
-
-    .modal{padding:24px 20px 20px;border-radius:16px;}
-    .modal-actions{flex-direction:column-reverse;}
-    .modal-actions button{width:100%;}
   }
 
+  /* 超窄屏 */
   @media (max-width:380px){
     body{padding-left:14px;padding-right:14px;}
     h1{font-size:1.8rem;}
     .game-card{padding:20px 16px 18px;}
     .tag{font-size:9.5px;padding:3px 8px;letter-spacing:.14em;}
     .desc{font-size:12.5px;}
-    .btn-new{font-size:12px;padding:8px 13px;}
+    .status{font-size:9.5px;letter-spacing:.1em;padding:5px 11px;}
   }
 
+  /* 横屏矮屏 */
   @media (max-height:520px) and (orientation:landscape){
     body{padding-top:calc(var(--safe-top) + 20px);padding-bottom:calc(var(--safe-bottom) + 20px);}
     .shell{margin:0 auto;}
@@ -730,7 +570,6 @@
         <span class="dot"></span>
         SYSTEM ONLINE&nbsp;//&nbsp;GAME LIBRARY
       </div>
-      <button class="btn-new" id="btnNew" type="button">＋ 新建游戏</button>
     </div>
 
     <h1>我的游戏库</h1>
@@ -751,30 +590,6 @@
 
   </div>
 
-  <div class="modal-mask" id="mask" aria-hidden="true">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-      <h3 id="modalTitle">新建游戏</h3>
-      <p class="modal-tip">游戏保存在本机浏览器里。链接可以直接填 <b>xxx.html</b>（同目录文件），也可以填完整网址。</p>
-
-      <label class="field">
-        <span>游戏名称</span>
-        <input id="inName" type="text" maxlength="40" placeholder="例如：极限拉扯" autocomplete="off" enterkeyhint="next">
-      </label>
-
-      <label class="field">
-        <span>游戏链接</span>
-        <input id="inUrl" type="text" maxlength="500" placeholder="例如：ExtremeTension.html" autocomplete="off" enterkeyhint="done">
-      </label>
-
-      <p class="modal-err" id="modalErr"></p>
-
-      <div class="modal-actions">
-        <button type="button" class="btn-ghost" id="btnCancel">取消</button>
-        <button type="button" class="btn-primary" id="btnSave">保存</button>
-      </div>
-    </div>
-  </div>
-
 <script>
 (function(){
   'use strict';
@@ -786,7 +601,7 @@
     'https://api.github.com/repos/wmnmhm/mynet2026/contents/?ref=main'
   ];
 
-  /* 兜底数据：接口不可用时显示这一份（tag 可自定义，不写则默认 CACHED） */
+  /* 兜底数据：接口不可用时显示这一份（tag 不写则默认 CACHED） */
   var FALLBACK_GAMES = [
     { name: '数字融合',   url: 'number.html',            desc: '点击分裂，拖拽合成' },
     { name: '打砖块',     url: 'breakout.html',          desc: '移动鼠标接球，打碎所有砖块' },
@@ -796,17 +611,12 @@
     { name: '空间破碎',   url: 'fangkuai.html',          desc: '点击进入 · fangkuai.html', tag: 'BREAK' }
   ];
 
-  var LS_KEY  = 'gamehub:customGames:v1';
   var ACCENTS = ['', 'violet', 'magenta', 'amber', 'indigo'];
 
   /* ========== 元素 ========== */
   var grid     = document.getElementById('grid');
   var subtitle = document.getElementById('subtitle');
   var notice   = document.getElementById('notice');
-  var mask     = document.getElementById('mask');
-  var inName   = document.getElementById('inName');
-  var inUrl    = document.getElementById('inUrl');
-  var modalErr = document.getElementById('modalErr');
 
   /* ========== 状态 ========== */
   var repoGames  = [];
@@ -820,21 +630,6 @@
     });
   }
 
-  function getCustom(){
-    try{
-      var raw = localStorage.getItem(LS_KEY);
-      var arr = raw ? JSON.parse(raw) : [];
-      if(!Array.isArray(arr)) return [];
-      return arr.filter(function(g){
-        return g && typeof g.name === 'string' && typeof g.url === 'string' && g.name && g.url;
-      });
-    }catch(e){ return []; }
-  }
-
-  function setCustom(list){
-    try{ localStorage.setItem(LS_KEY, JSON.stringify(list)); }catch(e){}
-  }
-
   function errText(err){
     var msg = err && err.message;
     if(err && err.name === 'AbortError') return '请求超时，网络可能较慢。';
@@ -846,55 +641,34 @@
   }
 
   /* ========== 渲染 ========== */
-  function cardHTML(game, index, customIndex){
+  function cardHTML(game, index){
     var accent = ACCENTS[index % ACCENTS.length];
     var num = String(index + 1);
     if(num.length < 2) num = '0' + num;
 
-    var isCustom = game.source === 'custom';
-    var tag = game.tag || (isCustom ? 'CUSTOM' : (game.source === 'fallback' ? 'CACHED' : 'HTML'));
+    var tag = game.tag || (game.source === 'fallback' ? 'CACHED' : 'HTML');
     var delay = (0.18 + Math.min(index, 8) * 0.07).toFixed(2);
 
     return '' +
-      '<div class="card-slot">' +
-        '<a class="game-card ' + accent + '" href="' + esc(game.url) + '" target="_blank" rel="noopener"' +
-          ' style="animation-delay:' + delay + 's">' +
-          '<div class="card-top">' +
-            '<span class="idx">' + num + '</span>' +
-            '<span class="tag">' + esc(tag) + '</span>' +
-          '</div>' +
-          '<h2>' + esc(game.name) + '</h2>' +
-          '<p class="desc">' + esc(game.desc) + '</p>' +
-          '<span class="play">START' +
-            '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' +
-          '</span>' +
-        '</a>' +
-        (isCustom
-          ? '<button type="button" class="del-btn" data-del="' + customIndex +
-            '" aria-label="删除 ' + esc(game.name) + '" title="删除">✕</button>'
-          : '') +
-      '</div>';
+      '<a class="game-card ' + accent + '" href="' + esc(game.url) + '" target="_blank" rel="noopener"' +
+        ' style="animation-delay:' + delay + 's">' +
+        '<div class="card-top">' +
+          '<span class="idx">' + num + '</span>' +
+          '<span class="tag">' + esc(tag) + '</span>' +
+        '</div>' +
+        '<h2>' + esc(game.name) + '</h2>' +
+        '<p class="desc">' + esc(game.desc) + '</p>' +
+        '<span class="play">START' +
+          '<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' +
+        '</span>' +
+      '</a>';
   }
 
   function render(){
-    var seen = {};
-    repoGames.forEach(function(g){
-      seen[String(g.url).toLowerCase()] = true;
-    });
-
-    var custom = getCustom().filter(function(g){
-      var key = String(g.url).toLowerCase();
-      if(seen[key]) return false;
-      seen[key] = true;
-      return true;
-    }).map(function(g){
-      return { name: g.name, url: g.url, desc: '自定义游戏 · 本机保存', source: 'custom' };
-    });
-
-    var total = repoGames.length + custom.length;
+    var total = repoGames.length;
 
     if(!total){
-      subtitle.textContent = '暂无游戏 · 点右上角新建一个';
+      subtitle.textContent = '暂无游戏';
     }else if(dataSource === 'fallback'){
       subtitle.textContent = '已加载 ' + total + ' 款游戏 · 内置备用列表';
     }else{
@@ -914,11 +688,7 @@
     var html = '';
 
     repoGames.forEach(function(g, i){
-      html += cardHTML(g, i, -1);
-    });
-
-    custom.forEach(function(g, i){
-      html += cardHTML(g, repoGames.length + i, i);
+      html += cardHTML(g, i);
     });
 
     if(!total){
@@ -926,7 +696,7 @@
         '<div class="state">' +
           '<div class="state-icon">+</div>' +
           '<h3>还没有游戏</h3>' +
-          '<p>把任意 .html 文件推到仓库根目录并刷新页面，卡片会自动出现；也可以点右上角「新建游戏」手动添加。</p>' +
+          '<p>把任意 .html 文件推到仓库根目录并刷新页面，卡片会自动出现。</p>' +
         '</div>';
     }
 
@@ -1021,77 +791,7 @@
     tryNext();
   }
 
-  /* ========== 弹窗 ========== */
-  function openModal(){
-    inName.value = '';
-    inUrl.value  = '';
-    modalErr.textContent = '';
-    mask.classList.add('show');
-    mask.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-    setTimeout(function(){ inName.focus(); }, 80);
-  }
-
-  function closeModal(){
-    mask.classList.remove('show');
-    mask.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-  }
-
-  function saveGame(){
-    var name = inName.value.trim();
-    var url  = inUrl.value.trim();
-
-    if(!name){ modalErr.textContent = '请填写游戏名称'; inName.focus(); return; }
-    if(!url){ modalErr.textContent = '请填写游戏链接'; inUrl.focus(); return; }
-    if(/^\s*(javascript|data|vbscript):/i.test(url)){
-      modalErr.textContent = '链接格式不支持，请填写普通网址或文件名';
-      inUrl.focus();
-      return;
-    }
-
-    var list = getCustom();
-    var dup = list.some(function(g){
-      return g.name.toLowerCase() === name.toLowerCase() && g.url === url;
-    });
-    if(dup){ modalErr.textContent = '已经存在同名同链接的游戏了'; return; }
-
-    list.push({ name: name.slice(0, 40), url: url });
-    setCustom(list);
-    closeModal();
-    render();
-  }
-
   /* ========== 事件 ========== */
-  document.getElementById('btnNew').addEventListener('click', openModal);
-  document.getElementById('btnCancel').addEventListener('click', closeModal);
-  document.getElementById('btnSave').addEventListener('click', saveGame);
-
-  mask.addEventListener('click', function(e){
-    if(e.target === mask) closeModal();
-  });
-
-  document.addEventListener('keydown', function(e){
-    if(!mask.classList.contains('show')) return;
-    if(e.key === 'Escape') closeModal();
-    if(e.key === 'Enter') saveGame();
-  });
-
-  grid.addEventListener('click', function(e){
-    var del = e.target.closest('[data-del]');
-    if(del){
-      e.preventDefault();
-      var i = parseInt(del.getAttribute('data-del'), 10);
-      var list = getCustom();
-      if(!list[i]) return;
-      if(window.confirm('确定删除「' + list[i].name + '」吗？')){
-        list.splice(i, 1);
-        setCustom(list);
-        render();
-      }
-    }
-  });
-
   notice.addEventListener('click', function(e){
     if(e.target.closest('#btnRetry')) loadRepo();
   });
