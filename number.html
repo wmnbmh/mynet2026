@@ -126,10 +126,10 @@
      1. 音效引擎（Web Audio API 纯代码合成，无任何外部音频文件）
      ============================================================ */
   const SFX = (function () {
-    let ac = null;          // AudioContext
-    let master = null;      // 总音量
-    let noiseBuf = null;    // 预生成白噪声
-    let unlocked = false;   // 是否已做过静音解锁
+    let ac = null;
+    let master = null;
+    let noiseBuf = null;
+    let unlocked = false;
     let muted = false;
     const VOL = 0.9;
 
@@ -143,7 +143,6 @@
       master = ac.createGain();
       master.gain.value = muted ? 0 : VOL;
 
-      // 压缩器：防止多个音效叠加时爆音
       const comp = ac.createDynamicsCompressor();
       comp.threshold.value = -18;
       comp.knee.value = 22;
@@ -154,7 +153,6 @@
       master.connect(comp);
       comp.connect(ac.destination);
 
-      // 预生成 0.7 秒白噪声，用于"啵"/"沙"质感
       const len = Math.floor(ac.sampleRate * 0.7);
       noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
       const ch = noiseBuf.getChannelData(0);
@@ -163,7 +161,6 @@
       return ac;
     }
 
-    /* --- 解锁：必须在用户手势里调用（iOS / 微信重点） --- */
     function unlock() {
       const a = ensure();
       if (!a) return;
@@ -173,7 +170,6 @@
       if (!unlocked) {
         unlocked = true;
         try {
-          // 播放一段极短的静音缓冲，把 iOS 的音频通道彻底打通
           const b = a.createBuffer(1, 1, a.sampleRate);
           const s = a.createBufferSource();
           s.buffer = b;
@@ -183,7 +179,6 @@
       }
     }
 
-    /* --- 基础：单音（带包络） --- */
     function tone(freq, type, dur, vol, slideTo, when) {
       if (!ac) return;
       const t = (when == null) ? ac.currentTime : when;
@@ -204,7 +199,6 @@
       o.onended = function () { try { o.disconnect(); g.disconnect(); } catch (e) {} };
     }
 
-    /* --- 基础：噪声脉冲（带通/高通） --- */
     function noise(when, dur, vol, hz, q, filterType) {
       if (!ac || !noiseBuf) return;
       const t = (when == null) ? ac.currentTime : when;
@@ -222,7 +216,7 @@
       s.onended = function () { try { s.disconnect(); f.disconnect(); g.disconnect(); } catch (e) {} };
     }
 
-    /* --- 1) 点击 / 抓起：清脆的"滴" --- */
+    /* 点击 / 抓起：清脆的"滴" */
     function click() {
       if (!ac) return;
       const t = ac.currentTime;
@@ -231,14 +225,14 @@
       noise(t, 0.020, 0.035, 5000, 1.4);
     }
 
-    /* --- 2) 拖拽起步：极轻的一声，提供手感反馈 --- */
+    /* 拖拽起步：极轻的一声 */
     function dragStart() {
       if (!ac) return;
       const t = ac.currentTime;
       tone(2600, 'sine', 0.040, 0.032, 2200, t);
     }
 
-    /* --- 3) 分裂：下滑的"啾"，音高随方块等级变化 --- */
+    /* 分裂：下滑的"啾" */
     function splitSfx(tier) {
       if (!ac) return;
       const t = ac.currentTime;
@@ -247,31 +241,29 @@
       noise(t, 0.09, 0.045, 2600, 1.8, 'bandpass');
     }
 
-    /* --- 4) 合成成功：钟声"叮" + 低频"啵"，音高随等级和连击升高 --- */
+    /* 合成成功：钟声"叮" + 低频"啵"，音高随等级与连击升高 */
     function mergeSfx(tier, combo) {
       if (!ac) return;
       const t = ac.currentTime + 0.002;
       const c = Math.max(0, Math.min(8, (combo || 1) - 1));
 
-      // 等级越高 + 连击越高 → 音高越高（半音为单位）
       const semi = Math.min(15, tier) + c * 1.2;
-      const f0 = Math.min(2000, 330 * Math.pow(2, semi / 12));
+      // 微小随机失谐：一帧内连爆多个时不会相位叠加成刺耳音
+      const detune = 1 + (Math.random() - 0.5) * 0.012;
+      const f0 = Math.min(2000, 330 * Math.pow(2, semi / 12)) * detune;
 
-      // 钟声泛音（非整数倍 → 金属光泽的"叮"）
-      tone(f0,        'sine', 1.00, 0.200, 0, t);
-      tone(f0 * 2.01, 'sine', 0.62, 0.100, 0, t);
-      tone(f0 * 3.01, 'sine', 0.40, 0.055, 0, t);
-      tone(f0 * 5.02, 'sine', 0.26, 0.028, 0, t);
+      tone(f0,        'sine', 0.95, 0.190, 0, t);
+      tone(f0 * 2.01, 'sine', 0.60, 0.095, 0, t);
+      tone(f0 * 3.01, 'sine', 0.38, 0.052, 0, t);
+      tone(f0 * 5.02, 'sine', 0.24, 0.026, 0, t);
 
-      // 低频"啵"：短促下滑，增加弹性
       tone(f0 * 0.75, 'sine', 0.12, 0.14, f0 * 0.45, t);
       noise(t, 0.05, 0.05, Math.min(9000, f0 * 6), 1.2);
 
-      // 高连击再加一点点闪光颗粒
       if (c >= 2) noise(t + 0.01, 0.18, 0.03, 8000, 0.9, 'highpass');
     }
 
-    /* --- 5) 无效操作：低沉的"嗡" --- */
+    /* 无效操作：低沉的"嗡" */
     function errorSfx() {
       if (!ac) return;
       const t = ac.currentTime;
@@ -283,7 +275,7 @@
       o1.type = 'sawtooth';
       o2.type = 'square';
       o1.frequency.setValueAtTime(104, t);
-      o2.frequency.setValueAtTime(107, t);   // 轻微失谐 → 拍频，产生"嗡嗡"感
+      o2.frequency.setValueAtTime(107, t);
       o1.frequency.exponentialRampToValueAtTime(64, t + 0.38);
       o2.frequency.exponentialRampToValueAtTime(66, t + 0.38);
 
@@ -354,10 +346,11 @@
   let drag = null;
   let hudScore = -1, hudMax = -1, hudCnt = -1, hudCombo = -1;
 
-  const MAX_BLOCKS = 70;
+  const MAX_BLOCKS = 74;
   const MAXV = 8192;
   const FACE  = 1.84;
   const TOUCH = 0.92;
+  const MERGES_PER_FRAME = 3;   // 每帧最多连锁合成次数（原为 1）
 
   const baseR = v => Math.min(17 + 8 * Math.log2(v), 110);
   const rad   = v => baseR(v) * scale;
@@ -391,7 +384,7 @@
       value,
       r: rad(value),
       hue: hueOf(value),
-      birth: time + 0.18,
+      birth: time + 0.10,     // 保护期更短：裂开/合成后更快能再次参与连锁
       pop: 1.5,
       seed: Math.random() * TAU,
       shake: 0,
@@ -520,13 +513,13 @@
     if (b.value < 2) {
       b.shake = 1;
       puff(b, 0.7);
-      SFX.error();                       // 无效：1 不能再分裂
+      SFX.error();
       return;
     }
     if (blocks.length >= MAX_BLOCKS) {
       b.shake = 1;
       texts.push({ x: b.x, y: b.y - b.r * 0.9, text: '太挤啦', life: 0, max: 0.9, size: 14, hue: b.hue });
-      SFX.error();                       // 无效：已达方块上限
+      SFX.error();
       return;
     }
 
@@ -543,15 +536,15 @@
         clamp(b.y + ny * d, cr, H - cr),
         half
       );
-      nb.vx = b.vx + nx * 170;
-      nb.vy = b.vy + ny * 170;
-      nb.pop = 1.8;
+      nb.vx = b.vx + nx * 200;
+      nb.vy = b.vy + ny * 200;
+      nb.pop = 1.65;
       blocks.push(nb);
     }
 
     b.dead = true;
     puff(b, 1.5);
-    SFX.split(Math.log2(b.value));       // 分裂音
+    SFX.split(Math.log2(b.value));
   }
 
   /* ---------- 合成 ---------- */
@@ -574,7 +567,7 @@
     const nb = makeBlock(x, y, value);
     nb.vx = (a.vx + b.vx) * 0.5;
     nb.vy = (a.vy + b.vy) * 0.5;
-    nb.pop = 1.9;
+    nb.pop = 1.8;
     blocks.push(nb);
 
     if (time - lastMerge < 1.15) combo++; else combo = 1;
@@ -607,39 +600,65 @@
 
     shake = Math.min(16, shake + 1 + t * 0.55);
 
-    SFX.merge(t, combo);                 // 合成音（音高随等级与连击升高）
+    // 合成成功 → 立刻加速下一次补给，玩了就马上有货
+    spawnT = Math.min(spawnT + 0.45, spawnInterval() * 0.85);
+
+    SFX.merge(t, combo);
   }
 
-  /* ---------- 自动补充 ---------- */
-  function trySpawn() {
-    if (blocks.length >= MAX_BLOCKS - 6) return;
-    const value = Math.random() < 0.75 ? 1 : 2;
+  /* ---------- 补给节奏（越快越好玩） ---------- */
+  function spawnInterval() {
+    const n = blocks.length;
+    if (n < 6)  return 0.45;   // 场上很空：疯狂补货
+    if (n < 14) return 0.75;
+    if (n < 28) return 1.05;
+    return 1.5;                // 已经很满了，放缓防止爆屏
+  }
+
+  function spawnOne() {
+    const value = Math.random() < 0.65 ? 1 : 2;
     const r = rad(value);
 
     for (let k = 0; k < 40; k++) {
-      const x = rand(W * 0.12, W * 0.88);
-      const y = rand(H * 0.12, H * 0.88);
+      const x = rand(W * 0.1, W * 0.9);
+      const y = rand(H * 0.1, H * 0.9);
       let ok = true;
       for (const b of blocks) {
         const dx = b.x - x, dy = b.y - y;
-        const m = b.r + r + 18;
+        const m = b.r + r + 14;
         if (dx * dx + dy * dy < m * m) { ok = false; break; }
       }
       if (!ok) continue;
 
       const nb = makeBlock(x, y, value);
       const a  = rand(0, TAU);
-      nb.vx = Math.cos(a) * 50;
-      nb.vy = Math.sin(a) * 50;
-      nb.pop = 1.6;
+      nb.vx = Math.cos(a) * 60;
+      nb.vy = Math.sin(a) * 60;
+      nb.pop = 1.55;
       blocks.push(nb);
-      burst(x, y, nb.hue, 12, 90, 1.6);
-      return;
+      burst(x, y, nb.hue, 10, 90, 1.5);
+      return true;
+    }
+    return false;
+  }
+
+  function trySpawn() {
+    const room = MAX_BLOCKS - 4 - blocks.length;
+    if (room <= 0) return;
+
+    // 越空补得越多，一下就把场子热起来
+    let n = 1;
+    if (blocks.length < 6)       n = 3;
+    else if (blocks.length < 14) n = 2;
+    n = Math.min(n, room);
+
+    for (let i = 0; i < n; i++) {
+      if (!spawnOne()) break;
     }
   }
 
   /* ---------- 碰撞 ---------- */
-  function collide() {
+  function collideOnce() {
     for (let i = 0; i < blocks.length; i++) {
       const a = blocks[i];
       if (a.dead) continue;
@@ -656,7 +675,7 @@
 
         if (a.value === b.value && a.value * 2 <= MAXV && canMerge(a, b)) {
           mergeBlocks(a, b);
-          return;
+          return true;
         }
 
         if (d2 < 0.0001) { b.x += 0.6; continue; }
@@ -687,6 +706,14 @@
         b.y = clamp(b.y, b.r, H - b.r);
       }
     }
+    return false;
+  }
+
+  function collide() {
+    // 一帧内最多连锁 MERGES_PER_FRAME 次：成堆的数字会"哗"地一次全合掉
+    for (let k = 0; k < MERGES_PER_FRAME; k++) {
+      if (!collideOnce()) break;
+    }
   }
 
   /* ---------- 更新 ---------- */
@@ -694,12 +721,15 @@
     time += dt;
 
     spawnT += dt;
-    if (spawnT > 2.6) { spawnT = 0; trySpawn(); }
+    if (spawnT >= spawnInterval()) {
+      spawnT = 0;
+      trySpawn();
+    }
 
     for (const b of blocks) {
       if (b.dead) continue;
 
-      if (b.pop > 1.0001) b.pop += (1 - b.pop) * Math.min(1, dt * 11);
+      if (b.pop > 1.0001) b.pop += (1 - b.pop) * Math.min(1, dt * 18); // 出现更干脆
       else b.pop = 1;
 
       if (b.shake > 0) b.shake = Math.max(0, b.shake - dt * 2.4);
@@ -870,14 +900,14 @@
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
-    SFX.unlock();                 // 所有音频调用的第一层保险
+    SFX.unlock();
 
     const p = pos(e);
     const b = pick(p.x, p.y);
     hideHint();
     if (!b) return;
 
-    SFX.click();                  // 点击 / 抓起音
+    SFX.click();
 
     const i = blocks.indexOf(b);
     if (i >= 0) { blocks.splice(i, 1); blocks.push(b); }
@@ -904,7 +934,7 @@
 
     if (!drag.moved && Math.hypot(p.x - drag.sx, p.y - drag.sy) > 8) {
       drag.moved = true;
-      SFX.dragStart();            // 拖拽起步的轻微反馈音
+      SFX.dragStart();
     }
 
     const nx = clamp(p.x - drag.ox, b.r, W - b.r);
@@ -962,11 +992,14 @@
     canvas.classList.remove('dragging');
 
     const b = makeBlock(W / 2, H / 2, 8);
-    b.pop = 2.4;
+    b.pop = 2.2;
     blocks.push(b);
 
     burst(W / 2, H / 2, b.hue, 42, 230, 2.6);
     rings.push({ x: W / 2, y: H / 2, r0: b.r * 0.6, r1: b.r * 4, life: 0, max: 0.8, hue: b.hue, lw: 5 });
+
+    // 开局先垫两块，别让人干等
+    spawnT = spawnInterval() * 0.55;
 
     hudScore = hudMax = hudCnt = hudCombo = -1;
     updateHUD();
@@ -989,9 +1022,7 @@
     if (!m) SFX.click();
   });
 
-  /* ---------- 音频解锁（iOS / 微信） ----------
-     第一次点按、触摸、按键都会尝试创建并恢复 AudioContext。
-     即使后续系统把上下文挂起，下一次手势也会自动恢复。 */
+  /* ---------- 音频解锁（iOS / 微信） ---------- */
   ['pointerdown', 'touchstart', 'mousedown', 'click', 'keydown'].forEach(ev => {
     window.addEventListener(ev, () => SFX.unlock(), { passive: true });
   });
