@@ -248,7 +248,6 @@
       const c = Math.max(0, Math.min(8, (combo || 1) - 1));
 
       const semi = Math.min(15, tier) + c * 1.2;
-      // 微小随机失谐：一帧内连爆多个时不会相位叠加成刺耳音
       const detune = 1 + (Math.random() - 0.5) * 0.012;
       const f0 = Math.min(2000, 330 * Math.pow(2, semi / 12)) * detune;
 
@@ -348,9 +347,9 @@
 
   const MAX_BLOCKS = 74;
   const MAXV = 8192;
-  const FACE  = 1.84;
-  const TOUCH = 0.92;
-  const MERGES_PER_FRAME = 3;   // 每帧最多连锁合成次数（原为 1）
+  const FACE  = 1.84;   // 方块边长 = 半径 * FACE
+  const TOUCH = 0.92;   // 物理碰撞系数
+  const MERGES_PER_FRAME = 3;
 
   const baseR = v => Math.min(17 + 8 * Math.log2(v), 110);
   const rad   = v => baseR(v) * scale;
@@ -384,7 +383,7 @@
       value,
       r: rad(value),
       hue: hueOf(value),
-      birth: time + 0.10,     // 保护期更短：裂开/合成后更快能再次参与连锁
+      birth: time + 0.10,
       pop: 1.5,
       seed: Math.random() * TAU,
       shake: 0,
@@ -600,19 +599,19 @@
 
     shake = Math.min(16, shake + 1 + t * 0.55);
 
-    // 合成成功 → 立刻加速下一次补给，玩了就马上有货
-    spawnT = Math.min(spawnT + 0.45, spawnInterval() * 0.85);
+    // 合成后小幅加速下一次补给（不再猛冲，保持中等节奏）
+    spawnT = Math.min(spawnT + 0.30, spawnInterval() * 0.75);
 
     SFX.merge(t, combo);
   }
 
-  /* ---------- 补给节奏（越快越好玩） ---------- */
+  /* ---------- 补给节奏（中等，不快不慢） ---------- */
   function spawnInterval() {
     const n = blocks.length;
-    if (n < 6)  return 0.45;   // 场上很空：疯狂补货
-    if (n < 14) return 0.75;
-    if (n < 28) return 1.05;
-    return 1.5;                // 已经很满了，放缓防止爆屏
+    if (n < 7)  return 1.00;   // 场上很空：稍快补货
+    if (n < 18) return 1.35;
+    if (n < 30) return 1.70;
+    return 2.10;               // 已经比较满：放缓
   }
 
   function spawnOne() {
@@ -646,10 +645,8 @@
     const room = MAX_BLOCKS - 4 - blocks.length;
     if (room <= 0) return;
 
-    // 越空补得越多，一下就把场子热起来
     let n = 1;
-    if (blocks.length < 6)       n = 3;
-    else if (blocks.length < 14) n = 2;
+    if (blocks.length < 7) n = 2;   // 只在场上方块很少时一次补两个
     n = Math.min(n, room);
 
     for (let i = 0; i < n; i++) {
@@ -710,7 +707,6 @@
   }
 
   function collide() {
-    // 一帧内最多连锁 MERGES_PER_FRAME 次：成堆的数字会"哗"地一次全合掉
     for (let k = 0; k < MERGES_PER_FRAME; k++) {
       if (!collideOnce()) break;
     }
@@ -729,7 +725,7 @@
     for (const b of blocks) {
       if (b.dead) continue;
 
-      if (b.pop > 1.0001) b.pop += (1 - b.pop) * Math.min(1, dt * 18); // 出现更干脆
+      if (b.pop > 1.0001) b.pop += (1 - b.pop) * Math.min(1, dt * 18);
       else b.pop = 1;
 
       if (b.shake > 0) b.shake = Math.max(0, b.shake - dt * 2.4);
@@ -886,15 +882,29 @@
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  function pick(x, y) {
-    for (let i = blocks.length - 1; i >= 0; i--) {
+  // 触控判定半径：覆盖方块整个方形区域（含四角），再外扩一圈
+  function hitHalf(b, pad) {
+    return b.r * FACE / 2 + Math.max(9, b.r * 0.20) + pad;
+  }
+
+  function pick(x, y, pad) {
+    let best = null;
+    let bestScore = Infinity;
+    pad = pad || 0;
+
+    for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
       if (b.dead) continue;
-      const rr = b.r * 1.02;
-      const dx = x - b.x, dy = y - b.y;
-      if (dx * dx + dy * dy <= rr * rr) return b;
+
+      const hh = hitHalf(b, pad);
+      const dx = x - b.x;
+      const dy = y - b.y;
+      if (Math.abs(dx) > hh || Math.abs(dy) > hh) continue;   // 方形判定
+
+      const score = Math.hypot(dx, dy) / hh;                 // 越靠近中心越优先
+      if (score < bestScore) { bestScore = score; best = b; }
     }
-    return null;
+    return best;
   }
 
   canvas.addEventListener('pointerdown', e => {
@@ -903,7 +913,9 @@
     SFX.unlock();
 
     const p = pos(e);
-    const b = pick(p.x, p.y);
+    // 手指触控多给 10px 宽容度，鼠标保持精确
+    const pad = (e.pointerType === 'mouse') ? 0 : 10;
+    const b = pick(p.x, p.y, pad);
     hideHint();
     if (!b) return;
 
@@ -998,8 +1010,7 @@
     burst(W / 2, H / 2, b.hue, 42, 230, 2.6);
     rings.push({ x: W / 2, y: H / 2, r0: b.r * 0.6, r1: b.r * 4, life: 0, max: 0.8, hue: b.hue, lw: 5 });
 
-    // 开局先垫两块，别让人干等
-    spawnT = spawnInterval() * 0.55;
+    spawnT = spawnInterval() * 0.5;
 
     hudScore = hudMax = hudCnt = hudCombo = -1;
     updateHUD();
