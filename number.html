@@ -325,13 +325,15 @@
   const canvas = document.getElementById('game');
   const ctx    = canvas.getContext('2d');
 
-  const $score = document.getElementById('score');
-  const $combo = document.getElementById('combo');
-  const $max   = document.getElementById('maxv');
-  const $cnt   = document.getElementById('cnt');
-  const $hint  = document.getElementById('hint');
-  const $reset = document.getElementById('reset');
-  const $mute  = document.getElementById('mute');
+  const $score   = document.getElementById('score');
+  const $combo   = document.getElementById('combo');
+  const $max     = document.getElementById('maxv');
+  const $cnt     = document.getElementById('cnt');
+  const $hint    = document.getElementById('hint');
+  const $reset   = document.getElementById('reset');
+  const $mute    = document.getElementById('mute');
+  const $topLeft = document.getElementById('topLeft');
+  const $topRight= document.getElementById('topRight');
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const rand  = (a, b) => a + Math.random() * (b - a);
@@ -345,15 +347,26 @@
   let drag = null;
   let hudScore = -1, hudMax = -1, hudCnt = -1, hudCombo = -1;
 
+  /* ---------- 可玩区域边界（顶部 HUD 之下） ---------- */
+  let fieldTop = 96;          // 分界线 Y 坐标：方块不允许越过它
+  const HUD_GAP = 18;         // 与 HUD 之间留的呼吸空间
+
   const MAX_BLOCKS = 74;
   const MAXV = 8192;
-  const FACE  = 1.84;   // 方块边长 = 半径 * FACE
-  const TOUCH = 0.92;   // 物理碰撞系数
+  const FACE  = 1.84;
+  const TOUCH = 0.92;
   const MERGES_PER_FRAME = 3;
 
   const baseR = v => Math.min(17 + 8 * Math.log2(v), 110);
   const rad   = v => baseR(v) * scale;
   const hueOf = v => ((Math.log2(v) * 42 + 188) % 360 + 360) % 360;
+
+  /* ---------- 计算分界线位置 ---------- */
+  function computeFieldTop() {
+    const a = $topLeft.getBoundingClientRect();
+    const b = $topRight.getBoundingClientRect();
+    fieldTop = Math.max(76, Math.max(a.bottom, b.bottom) + HUD_GAP);
+  }
 
   /* ---------- 尺寸 ---------- */
   function resize() {
@@ -367,12 +380,14 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     scale = clamp(Math.min(W, H) / 640, 0.62, 1.15);
 
+    computeFieldTop();
+
     for (const b of blocks) {
       b.r = rad(b.value);
       b.grad = b.glow = b.hg = null;
       b.fs = 0;
       b.x = clamp(b.x, b.r, W - b.r);
-      b.y = clamp(b.y, b.r, H - b.r);
+      b.y = clamp(b.y, fieldTop + b.r, H - b.r);
     }
   }
 
@@ -532,7 +547,7 @@
       const ny = Math.sin(ang) * sgn;
       const nb = makeBlock(
         clamp(b.x + nx * d, cr, W - cr),
-        clamp(b.y + ny * d, cr, H - cr),
+        clamp(b.y + ny * d, fieldTop + cr, H - cr),
         half
       );
       nb.vx = b.vx + nx * 200;
@@ -599,19 +614,18 @@
 
     shake = Math.min(16, shake + 1 + t * 0.55);
 
-    // 合成后小幅加速下一次补给（不再猛冲，保持中等节奏）
     spawnT = Math.min(spawnT + 0.30, spawnInterval() * 0.75);
 
     SFX.merge(t, combo);
   }
 
-  /* ---------- 补给节奏（中等，不快不慢） ---------- */
+  /* ---------- 补给节奏 ---------- */
   function spawnInterval() {
     const n = blocks.length;
-    if (n < 7)  return 1.00;   // 场上很空：稍快补货
+    if (n < 7)  return 1.00;
     if (n < 18) return 1.35;
     if (n < 30) return 1.70;
-    return 2.10;               // 已经比较满：放缓
+    return 2.10;
   }
 
   function spawnOne() {
@@ -620,7 +634,7 @@
 
     for (let k = 0; k < 40; k++) {
       const x = rand(W * 0.1, W * 0.9);
-      const y = rand(H * 0.1, H * 0.9);
+      const y = rand(fieldTop + r + 12, H - r - 10);   // 只在分界线以下出生
       let ok = true;
       for (const b of blocks) {
         const dx = b.x - x, dy = b.y - y;
@@ -646,7 +660,7 @@
     if (room <= 0) return;
 
     let n = 1;
-    if (blocks.length < 7) n = 2;   // 只在场上方块很少时一次补两个
+    if (blocks.length < 7) n = 2;
     n = Math.min(n, room);
 
     for (let i = 0; i < n; i++) {
@@ -698,9 +712,9 @@
         }
 
         a.x = clamp(a.x, a.r, W - a.r);
-        a.y = clamp(a.y, a.r, H - a.r);
+        a.y = clamp(a.y, fieldTop + a.r, H - a.r);
         b.x = clamp(b.x, b.r, W - b.r);
-        b.y = clamp(b.y, b.r, H - b.r);
+        b.y = clamp(b.y, fieldTop + b.r, H - b.r);
       }
     }
     return false;
@@ -738,10 +752,13 @@
       b.vx *= damp;
       b.vy *= damp;
 
-      const m = b.r;
+      const m  = b.r;
+      const top = fieldTop + m;     // 上方以分界线为墙
+
       if (b.x < m)          { b.x = m;       if (b.vx < 0) b.vx = -b.vx * 0.75; }
       else if (b.x > W - m) { b.x = W - m;   if (b.vx > 0) b.vx = -b.vx * 0.75; }
-      if (b.y < m)          { b.y = m;       if (b.vy < 0) b.vy = -b.vy * 0.75; }
+
+      if (b.y < top)        { b.y = top;     if (b.vy < 0) b.vy = -b.vy * 0.75; }
       else if (b.y > H - m) { b.y = H - m;   if (b.vy > 0) b.vy = -b.vy * 0.75; }
     }
 
@@ -779,9 +796,45 @@
     if (shake > 0)  { shake = Math.max(0, shake - dt * 40); }
   }
 
+  /* ---------- 分界线绘制 ---------- */
+  function drawFieldLine() {
+    const y = fieldTop;
+
+    // HUD 区域轻微压暗，强调"上方是面板"
+    const shade = ctx.createLinearGradient(0, 0, 0, y);
+    shade.addColorStop(0,   'rgba(4,5,11,0.62)');
+    shade.addColorStop(0.7, 'rgba(4,5,11,0.30)');
+    shade.addColorStop(1,   'rgba(4,5,11,0)');
+    ctx.fillStyle = shade;
+    ctx.fillRect(0, 0, W, y);
+
+    // 中间亮、两端淡出的分界线
+    const line = ctx.createLinearGradient(0, 0, W, 0);
+    line.addColorStop(0,    'rgba(120,190,255,0)');
+    line.addColorStop(0.18, 'rgba(120,200,255,0.35)');
+    line.addColorStop(0.5,  'rgba(165,225,255,0.85)');
+    line.addColorStop(0.82, 'rgba(120,200,255,0.35)');
+    line.addColorStop(1,    'rgba(120,190,255,0)');
+    ctx.fillStyle = line;
+    ctx.fillRect(0, y - 1, W, 2);
+
+    // 分界线下方柔和辉光
+    ctx.globalCompositeOperation = 'lighter';
+    const glow = ctx.createLinearGradient(0, y - 16, 0, y + 18);
+    glow.addColorStop(0,   'rgba(80,170,255,0)');
+    glow.addColorStop(0.45,'rgba(110,200,255,0.13)');
+    glow.addColorStop(1,   'rgba(80,170,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, y - 16, W, 34);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   /* ---------- 渲染 ---------- */
   function render() {
     ctx.clearRect(0, 0, W, H);
+
+    drawFieldLine();          // 固定不动，不参与震屏
+
     ctx.save();
 
     if (shake > 0.3) {
@@ -882,7 +935,7 @@
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  // 触控判定半径：覆盖方块整个方形区域（含四角），再外扩一圈
+  // 触控判定：覆盖方块整个方形区域（含四角），再外扩一圈
   function hitHalf(b, pad) {
     return b.r * FACE / 2 + Math.max(9, b.r * 0.20) + pad;
   }
@@ -899,9 +952,9 @@
       const hh = hitHalf(b, pad);
       const dx = x - b.x;
       const dy = y - b.y;
-      if (Math.abs(dx) > hh || Math.abs(dy) > hh) continue;   // 方形判定
+      if (Math.abs(dx) > hh || Math.abs(dy) > hh) continue;
 
-      const score = Math.hypot(dx, dy) / hh;                 // 越靠近中心越优先
+      const score = Math.hypot(dx, dy) / hh;
       if (score < bestScore) { bestScore = score; best = b; }
     }
     return best;
@@ -913,7 +966,6 @@
     SFX.unlock();
 
     const p = pos(e);
-    // 手指触控多给 10px 宽容度，鼠标保持精确
     const pad = (e.pointerType === 'mouse') ? 0 : 10;
     const b = pick(p.x, p.y, pad);
     hideHint();
@@ -950,7 +1002,7 @@
     }
 
     const nx = clamp(p.x - drag.ox, b.r, W - b.r);
-    const ny = clamp(p.y - drag.oy, b.r, H - b.r);
+    const ny = clamp(p.y - drag.oy, fieldTop + b.r, H - b.r);   // 拖拽也不越过线
 
     const t  = performance.now();
     const dt = Math.max(0.008, (t - drag.lt) / 1000);
@@ -1003,12 +1055,13 @@
     time = 0; spawnT = 0; shake = 0; drag = null;
     canvas.classList.remove('dragging');
 
-    const b = makeBlock(W / 2, H / 2, 8);
+    const cy = (fieldTop + H) / 2;
+    const b = makeBlock(W / 2, cy, 8);
     b.pop = 2.2;
     blocks.push(b);
 
-    burst(W / 2, H / 2, b.hue, 42, 230, 2.6);
-    rings.push({ x: W / 2, y: H / 2, r0: b.r * 0.6, r1: b.r * 4, life: 0, max: 0.8, hue: b.hue, lw: 5 });
+    burst(W / 2, cy, b.hue, 42, 230, 2.6);
+    rings.push({ x: W / 2, y: cy, r0: b.r * 0.6, r1: b.r * 4, life: 0, max: 0.8, hue: b.hue, lw: 5 });
 
     spawnT = spawnInterval() * 0.5;
 
@@ -1043,6 +1096,9 @@
 
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { computeFieldTop(); });
+  }
   setTimeout(hideHint, 12000);
 
   /* ---------- 主循环 ---------- */
