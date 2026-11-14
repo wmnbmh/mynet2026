@@ -54,19 +54,28 @@
   }
   #combo.on{opacity:1}
 
-  #topRight{right:20px;top:22px;display:flex;align-items:center;gap:18px}
+  #topRight{right:20px;top:22px;display:flex;align-items:center;gap:12px}
   .stat{text-align:right;font-size:10px;letter-spacing:.18em;color:rgba(150,195,255,.5)}
   .stat b{
     display:block;margin-top:3px;font-size:19px;font-weight:800;letter-spacing:0;
     color:#dceaff;font-variant-numeric:tabular-nums;
   }
-  #reset{
+  #reset,#mute{
     pointer-events:auto;cursor:pointer;border:1px solid rgba(120,190,255,.35);color:#cfe7ff;
-    background:rgba(30,70,130,.28);backdrop-filter:blur(8px);border-radius:12px;padding:9px 14px;
-    font-size:12px;letter-spacing:.12em;font-family:inherit;transition:.2s;
+    background:rgba(30,70,130,.28);backdrop-filter:blur(8px);border-radius:12px;
+    transition:.2s;font-family:inherit;
   }
-  #reset:hover{background:rgba(50,120,210,.4);border-color:rgba(150,215,255,.7);box-shadow:0 0 20px rgba(80,170,255,.35)}
-  #reset:active{transform:scale(.96)}
+  #reset{padding:9px 14px;font-size:12px;letter-spacing:.12em}
+  #mute{
+    width:38px;height:38px;padding:0;font-size:16px;line-height:1;
+    display:flex;align-items:center;justify-content:center;
+  }
+  #reset:hover,#mute:hover{
+    background:rgba(50,120,210,.4);border-color:rgba(150,215,255,.7);
+    box-shadow:0 0 20px rgba(80,170,255,.35);
+  }
+  #reset:active,#mute:active{transform:scale(.96)}
+  #mute.off{opacity:.55;border-color:rgba(120,190,255,.18)}
 
   #hint{
     position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:3;pointer-events:none;
@@ -80,9 +89,10 @@
   @media (max-width:560px){
     #topLeft{left:16px;top:16px}
     #score{font-size:30px}
-    #topRight{right:14px;top:16px;gap:12px}
+    #topRight{right:14px;top:16px;gap:8px}
     .stat b{font-size:16px}
     #reset{padding:7px 11px}
+    #mute{width:34px;height:34px;font-size:15px}
     #hint{font-size:11px;letter-spacing:.05em;bottom:16px;padding:7px 12px}
   }
 </style>
@@ -102,6 +112,7 @@
 <div class="hud" id="topRight">
   <div class="stat">最大数字<b id="maxv">8</b></div>
   <div class="stat">方块数<b id="cnt">1</b></div>
+  <button id="mute" title="音效开关">🔊</button>
   <button id="reset">重来</button>
 </div>
 
@@ -111,6 +122,212 @@
 (function () {
   'use strict';
 
+  /* ============================================================
+     1. 音效引擎（Web Audio API 纯代码合成，无任何外部音频文件）
+     ============================================================ */
+  const SFX = (function () {
+    let ac = null;          // AudioContext
+    let master = null;      // 总音量
+    let noiseBuf = null;    // 预生成白噪声
+    let unlocked = false;   // 是否已做过静音解锁
+    let muted = false;
+    const VOL = 0.9;
+
+    function ensure() {
+      if (ac) return ac;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { ac = new AC({ latencyHint: 'interactive' }); }
+      catch (e) { ac = new AC(); }
+
+      master = ac.createGain();
+      master.gain.value = muted ? 0 : VOL;
+
+      // 压缩器：防止多个音效叠加时爆音
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -18;
+      comp.knee.value = 22;
+      comp.ratio.value = 6;
+      comp.attack.value = 0.004;
+      comp.release.value = 0.22;
+
+      master.connect(comp);
+      comp.connect(ac.destination);
+
+      // 预生成 0.7 秒白噪声，用于"啵"/"沙"质感
+      const len = Math.floor(ac.sampleRate * 0.7);
+      noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
+      const ch = noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) ch[i] = Math.random() * 2 - 1;
+
+      return ac;
+    }
+
+    /* --- 解锁：必须在用户手势里调用（iOS / 微信重点） --- */
+    function unlock() {
+      const a = ensure();
+      if (!a) return;
+      if (a.state === 'suspended' || a.state === 'interrupted') {
+        a.resume().catch(function () {});
+      }
+      if (!unlocked) {
+        unlocked = true;
+        try {
+          // 播放一段极短的静音缓冲，把 iOS 的音频通道彻底打通
+          const b = a.createBuffer(1, 1, a.sampleRate);
+          const s = a.createBufferSource();
+          s.buffer = b;
+          s.connect(a.destination);
+          s.start(0);
+        } catch (e) {}
+      }
+    }
+
+    /* --- 基础：单音（带包络） --- */
+    function tone(freq, type, dur, vol, slideTo, when) {
+      if (!ac) return;
+      const t = (when == null) ? ac.currentTime : when;
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t);
+      if (slideTo && slideTo > 0) {
+        o.frequency.exponentialRampToValueAtTime(slideTo, t + dur * 0.92);
+      }
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g);
+      g.connect(master);
+      o.start(t);
+      o.stop(t + dur + 0.03);
+      o.onended = function () { try { o.disconnect(); g.disconnect(); } catch (e) {} };
+    }
+
+    /* --- 基础：噪声脉冲（带通/高通） --- */
+    function noise(when, dur, vol, hz, q, filterType) {
+      if (!ac || !noiseBuf) return;
+      const t = (when == null) ? ac.currentTime : when;
+      const s = ac.createBufferSource();
+      s.buffer = noiseBuf;
+      const f = ac.createBiquadFilter();
+      f.type = filterType || 'bandpass';
+      f.frequency.value = hz;
+      f.Q.value = q || 1;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(Math.max(0.0002, vol), t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      s.connect(f); f.connect(g); g.connect(master);
+      s.start(t, Math.random() * 0.4, dur + 0.02);
+      s.onended = function () { try { s.disconnect(); f.disconnect(); g.disconnect(); } catch (e) {} };
+    }
+
+    /* --- 1) 点击 / 抓起：清脆的"滴" --- */
+    function click() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      tone(1800, 'sine',     0.060, 0.14,  1350, t);
+      tone(3300, 'triangle', 0.035, 0.050, 2900, t);
+      noise(t, 0.020, 0.035, 5000, 1.4);
+    }
+
+    /* --- 2) 拖拽起步：极轻的一声，提供手感反馈 --- */
+    function dragStart() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      tone(2600, 'sine', 0.040, 0.032, 2200, t);
+    }
+
+    /* --- 3) 分裂：下滑的"啾"，音高随方块等级变化 --- */
+    function splitSfx(tier) {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const f = 340 * Math.pow(2, Math.min(tier, 10) / 12);
+      tone(f * 2.4, 'triangle', 0.14, 0.10, f * 0.9, t);
+      noise(t, 0.09, 0.045, 2600, 1.8, 'bandpass');
+    }
+
+    /* --- 4) 合成成功：钟声"叮" + 低频"啵"，音高随等级和连击升高 --- */
+    function mergeSfx(tier, combo) {
+      if (!ac) return;
+      const t = ac.currentTime + 0.002;
+      const c = Math.max(0, Math.min(8, (combo || 1) - 1));
+
+      // 等级越高 + 连击越高 → 音高越高（半音为单位）
+      const semi = Math.min(15, tier) + c * 1.2;
+      const f0 = Math.min(2000, 330 * Math.pow(2, semi / 12));
+
+      // 钟声泛音（非整数倍 → 金属光泽的"叮"）
+      tone(f0,        'sine', 1.00, 0.200, 0, t);
+      tone(f0 * 2.01, 'sine', 0.62, 0.100, 0, t);
+      tone(f0 * 3.01, 'sine', 0.40, 0.055, 0, t);
+      tone(f0 * 5.02, 'sine', 0.26, 0.028, 0, t);
+
+      // 低频"啵"：短促下滑，增加弹性
+      tone(f0 * 0.75, 'sine', 0.12, 0.14, f0 * 0.45, t);
+      noise(t, 0.05, 0.05, Math.min(9000, f0 * 6), 1.2);
+
+      // 高连击再加一点点闪光颗粒
+      if (c >= 2) noise(t + 0.01, 0.18, 0.03, 8000, 0.9, 'highpass');
+    }
+
+    /* --- 5) 无效操作：低沉的"嗡" --- */
+    function errorSfx() {
+      if (!ac) return;
+      const t = ac.currentTime;
+      const o1 = ac.createOscillator();
+      const o2 = ac.createOscillator();
+      const f  = ac.createBiquadFilter();
+      const g  = ac.createGain();
+
+      o1.type = 'sawtooth';
+      o2.type = 'square';
+      o1.frequency.setValueAtTime(104, t);
+      o2.frequency.setValueAtTime(107, t);   // 轻微失谐 → 拍频，产生"嗡嗡"感
+      o1.frequency.exponentialRampToValueAtTime(64, t + 0.38);
+      o2.frequency.exponentialRampToValueAtTime(66, t + 0.38);
+
+      f.type = 'lowpass';
+      f.Q.value = 5;
+      f.frequency.setValueAtTime(620, t);
+      f.frequency.exponentialRampToValueAtTime(190, t + 0.40);
+
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.13, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+
+      o1.connect(f); o2.connect(f); f.connect(g); g.connect(master);
+      o1.start(t); o2.start(t);
+      o1.stop(t + 0.45); o2.stop(t + 0.45);
+      o1.onended = function () {
+        try { o1.disconnect(); o2.disconnect(); f.disconnect(); g.disconnect(); } catch (e) {}
+      };
+    }
+
+    function setMuted(m) {
+      muted = !!m;
+      if (master && ac) {
+        const t = ac.currentTime;
+        master.gain.cancelScheduledValues(t);
+        master.gain.setTargetAtTime(muted ? 0 : VOL, t, 0.02);
+      }
+    }
+
+    return {
+      unlock: unlock,
+      click: click,
+      dragStart: dragStart,
+      split: splitSfx,
+      merge: mergeSfx,
+      error: errorSfx,
+      setMuted: setMuted,
+      isMuted: function () { return muted; }
+    };
+  })();
+
+  /* ============================================================
+     2. 游戏本体
+     ============================================================ */
   const TAU  = Math.PI * 2;
   const FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif';
 
@@ -123,14 +340,14 @@
   const $cnt   = document.getElementById('cnt');
   const $hint  = document.getElementById('hint');
   const $reset = document.getElementById('reset');
+  const $mute  = document.getElementById('mute');
 
-  /* ================= 基础工具 ================= */
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const rand  = (a, b) => a + Math.random() * (b - a);
 
   let W = 0, H = 0, DPR = 1, scale = 1;
 
-  /* ================= 状态 ================= */
+  /* ---------- 状态 ---------- */
   let blocks = [], parts = [], rings = [], flashes = [], texts = [];
   let score = 0, maxVal = 8, combo = 0, comboT = 0, lastMerge = -99;
   let time = 0, spawnT = 0, shake = 0;
@@ -139,16 +356,14 @@
 
   const MAX_BLOCKS = 70;
   const MAXV = 8192;
-  const FACE = 1.84;   // 方块边长 = 碰撞半径 * FACE
-  const TOUCH = 0.92;  // 碰撞判定系数
+  const FACE  = 1.84;
+  const TOUCH = 0.92;
 
-  // 半径随数值（2 的幂）增长
   const baseR = v => Math.min(17 + 8 * Math.log2(v), 110);
   const rad   = v => baseR(v) * scale;
-  // 色相随等级变化，形成彩虹阶梯
   const hueOf = v => ((Math.log2(v) * 42 + 188) % 360 + 360) % 360;
 
-  /* ================= 尺寸 ================= */
+  /* ---------- 尺寸 ---------- */
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth;
@@ -169,17 +384,17 @@
     }
   }
 
-  /* ================= 方块 ================= */
+  /* ---------- 方块 ---------- */
   function makeBlock(x, y, value) {
     return {
       x, y, vx: 0, vy: 0,
       value,
       r: rad(value),
       hue: hueOf(value),
-      birth: time + 0.18,      // 保护期，避免刚分裂就立刻合体
-      pop: 1.5,                // 出现放大动画
+      birth: time + 0.18,
+      pop: 1.5,
       seed: Math.random() * TAU,
-      shake: 0,                // 无法分裂时的抖动
+      shake: 0,
       dragged: false,
       dead: false,
       grad: null, glow: null, hg: null, fs: 0
@@ -197,7 +412,6 @@
     ctx.closePath();
   }
 
-  // 渐变按方块本地坐标创建一次并缓存
   function prep(b) {
     if (b.grad) return;
     const s = b.r * FACE, h = b.hue;
@@ -239,7 +453,6 @@
     ctx.translate(b.x + sx, b.y);
     ctx.scale(k, k);
 
-    // 外发光
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = b.glow;
     ctx.beginPath();
@@ -247,22 +460,18 @@
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
 
-    // 方块主体
     roundRectPath(-s / 2, -s / 2, s, s, s * 0.27);
     ctx.fillStyle = b.grad;
     ctx.fill();
 
-    // 亮边
     ctx.lineWidth = Math.max(1.4, s * 0.035);
     ctx.strokeStyle = 'hsla(' + b.hue + ',100%,88%,.8)';
     ctx.stroke();
 
-    // 玻璃高光
     roundRectPath(-s / 2 + s * 0.1, -s / 2 + s * 0.1, s * 0.8, s * 0.4, s * 0.2);
     ctx.fillStyle = b.hg;
     ctx.fill();
 
-    // 数字
     if (!b.fs) b.fs = calcFont(b, s);
     ctx.font = '800 ' + b.fs + 'px ' + FONT;
     ctx.textAlign = 'center';
@@ -276,7 +485,7 @@
     ctx.restore();
   }
 
-  /* ================= 粒子 / 光环 / 文字 ================= */
+  /* ---------- 粒子 / 光环 / 文字 ---------- */
   function burst(x, y, hue, count, power, size) {
     for (let i = 0; i < count; i++) {
       const a  = Math.random() * TAU;
@@ -304,18 +513,20 @@
     });
   }
 
-  /* ================= 分裂 ================= */
+  /* ---------- 分裂 ---------- */
   function splitBlock(b) {
     if (b.dead) return;
 
-    if (b.value < 2) {           // 1 无法再分裂
+    if (b.value < 2) {
       b.shake = 1;
       puff(b, 0.7);
+      SFX.error();                       // 无效：1 不能再分裂
       return;
     }
     if (blocks.length >= MAX_BLOCKS) {
       b.shake = 1;
       texts.push({ x: b.x, y: b.y - b.r * 0.9, text: '太挤啦', life: 0, max: 0.9, size: 14, hue: b.hue });
+      SFX.error();                       // 无效：已达方块上限
       return;
     }
 
@@ -340,9 +551,10 @@
 
     b.dead = true;
     puff(b, 1.5);
+    SFX.split(Math.log2(b.value));       // 分裂音
   }
 
-  /* ================= 合成 ================= */
+  /* ---------- 合成 ---------- */
   function canMerge(a, b) {
     return time > a.birth && time > b.birth;
   }
@@ -365,7 +577,6 @@
     nb.pop = 1.9;
     blocks.push(nb);
 
-    // 连击
     if (time - lastMerge < 1.15) combo++; else combo = 1;
     lastMerge = time;
     comboT = 1.4;
@@ -395,9 +606,11 @@
     }
 
     shake = Math.min(16, shake + 1 + t * 0.55);
+
+    SFX.merge(t, combo);                 // 合成音（音高随等级与连击升高）
   }
 
-  /* ================= 自动补充 ================= */
+  /* ---------- 自动补充 ---------- */
   function trySpawn() {
     if (blocks.length >= MAX_BLOCKS - 6) return;
     const value = Math.random() < 0.75 ? 1 : 2;
@@ -425,7 +638,7 @@
     }
   }
 
-  /* ================= 碰撞 ================= */
+  /* ---------- 碰撞 ---------- */
   function collide() {
     for (let i = 0; i < blocks.length; i++) {
       const a = blocks[i];
@@ -441,7 +654,6 @@
         const d2 = dx * dx + dy * dy;
         if (d2 >= rr * rr) continue;
 
-        // 相同数字 → 合成（每帧最多一次，形成连锁爆发感）
         if (a.value === b.value && a.value * 2 <= MAXV && canMerge(a, b)) {
           mergeBlocks(a, b);
           return;
@@ -462,7 +674,6 @@
         b.x += nx * overlap * bS;
         b.y += ny * overlap * bS;
 
-        // 弹开
         const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
         if (vn < 0) {
           const imp = -(1 + 0.85) * vn / 2;
@@ -478,7 +689,7 @@
     }
   }
 
-  /* ================= 更新 ================= */
+  /* ---------- 更新 ---------- */
   function update(dt) {
     time += dt;
 
@@ -502,17 +713,14 @@
       b.vy *= damp;
 
       const m = b.r;
-      if (b.x < m)        { b.x = m;        if (b.vx < 0) b.vx = -b.vx * 0.75; }
-      else if (b.x > W - m) { b.x = W - m;  if (b.vx > 0) b.vx = -b.vx * 0.75; }
-      if (b.y < m)        { b.y = m;        if (b.vy < 0) b.vy = -b.vy * 0.75; }
-      else if (b.y > H - m) { b.y = H - m;  if (b.vy > 0) b.vy = -b.vy * 0.75; }
+      if (b.x < m)          { b.x = m;       if (b.vx < 0) b.vx = -b.vx * 0.75; }
+      else if (b.x > W - m) { b.x = W - m;   if (b.vx > 0) b.vx = -b.vx * 0.75; }
+      if (b.y < m)          { b.y = m;       if (b.vy < 0) b.vy = -b.vy * 0.75; }
+      else if (b.y > H - m) { b.y = H - m;   if (b.vy > 0) b.vy = -b.vy * 0.75; }
     }
 
     collide();
-
-    if (blocks.length && blocks.indexOf(null) === -1) {
-      blocks = blocks.filter(b => !b.dead);
-    }
+    blocks = blocks.filter(b => !b.dead);
 
     updateEffects(dt);
   }
@@ -545,7 +753,7 @@
     if (shake > 0)  { shake = Math.max(0, shake - dt * 40); }
   }
 
-  /* ================= 渲染 ================= */
+  /* ---------- 渲染 ---------- */
   function render() {
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -554,12 +762,10 @@
       ctx.translate(rand(-shake, shake) * 0.45, rand(-shake, shake) * 0.45);
     }
 
-    // 方块
     for (const b of blocks) {
       if (!b.dead) drawBlock(b);
     }
 
-    // 爆炸闪光
     if (flashes.length) {
       ctx.globalCompositeOperation = 'lighter';
       for (const f of flashes) {
@@ -577,7 +783,6 @@
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    // 冲击波光环
     if (rings.length) {
       ctx.globalCompositeOperation = 'lighter';
       for (const r of rings) {
@@ -593,7 +798,6 @@
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    // 粒子
     if (parts.length) {
       ctx.globalCompositeOperation = 'lighter';
       for (const p of parts) {
@@ -604,7 +808,7 @@
         ctx.arc(p.x, p.y, rr, 0, TAU);
         ctx.fill();
 
-        if (rr > 1.4) {   // 外层柔光，廉价 bloom
+        if (rr > 1.4) {
           ctx.fillStyle = 'hsla(' + p.hue + ',100%,64%,' + (k * 0.13) + ')';
           ctx.beginPath();
           ctx.arc(p.x, p.y, rr * 3.4, 0, TAU);
@@ -614,7 +818,6 @@
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    // 浮动文字
     for (const t of texts) {
       const k = 1 - t.life / t.max;
       const y = t.y - (t.life / t.max) * 52;
@@ -631,7 +834,7 @@
     ctx.restore();
   }
 
-  /* ================= HUD ================= */
+  /* ---------- HUD ---------- */
   function updateHUD() {
     if (score !== hudScore) { hudScore = score; $score.textContent = score; }
     if (maxVal !== hudMax)  { hudMax = maxVal;   $max.textContent = maxVal; }
@@ -647,7 +850,7 @@
     }
   }
 
-  /* ================= 输入 ================= */
+  /* ---------- 输入 ---------- */
   function pos(e) {
     const r = canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -666,12 +869,16 @@
 
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+    SFX.unlock();                 // 所有音频调用的第一层保险
+
     const p = pos(e);
     const b = pick(p.x, p.y);
     hideHint();
     if (!b) return;
 
-    // 置顶
+    SFX.click();                  // 点击 / 抓起音
+
     const i = blocks.indexOf(b);
     if (i >= 0) { blocks.splice(i, 1); blocks.push(b); }
 
@@ -695,7 +902,10 @@
     const p = pos(e);
     const b = drag.b;
 
-    if (Math.hypot(p.x - drag.sx, p.y - drag.sy) > 8) drag.moved = true;
+    if (!drag.moved && Math.hypot(p.x - drag.sx, p.y - drag.sy) > 8) {
+      drag.moved = true;
+      SFX.dragStart();            // 拖拽起步的轻微反馈音
+    }
 
     const nx = clamp(p.x - drag.ox, b.r, W - b.r);
     const ny = clamp(p.y - drag.oy, b.r, H - b.r);
@@ -719,7 +929,7 @@
     drag = null;
     canvas.classList.remove('dragging');
 
-    if (!moved && dt < 500) {   // 视为「点击」
+    if (!moved && dt < 500) {
       b.vx *= 0.2;
       b.vy *= 0.2;
       splitBlock(b);
@@ -744,7 +954,7 @@
     $hint.classList.add('hide');
   }
 
-  /* ================= 重置 ================= */
+  /* ---------- 重置 ---------- */
   function reset() {
     blocks = []; parts = []; rings = []; flashes = []; texts = [];
     score = 0; maxVal = 8; combo = 0; comboT = 0; lastMerge = -99;
@@ -762,18 +972,44 @@
     updateHUD();
   }
 
-  $reset.addEventListener('click', e => { e.stopPropagation(); reset(); });
+  $reset.addEventListener('click', e => {
+    e.stopPropagation();
+    SFX.unlock();
+    SFX.click();
+    reset();
+  });
+
+  $mute.addEventListener('click', e => {
+    e.stopPropagation();
+    SFX.unlock();
+    const m = !SFX.isMuted();
+    SFX.setMuted(m);
+    $mute.textContent = m ? '🔇' : '🔊';
+    $mute.classList.toggle('off', m);
+    if (!m) SFX.click();
+  });
+
+  /* ---------- 音频解锁（iOS / 微信） ----------
+     第一次点按、触摸、按键都会尝试创建并恢复 AudioContext。
+     即使后续系统把上下文挂起，下一次手势也会自动恢复。 */
+  ['pointerdown', 'touchstart', 'mousedown', 'click', 'keydown'].forEach(ev => {
+    window.addEventListener(ev, () => SFX.unlock(), { passive: true });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) SFX.unlock();
+  });
+
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 120));
   setTimeout(hideHint, 12000);
 
-  /* ================= 主循环 ================= */
+  /* ---------- 主循环 ---------- */
   let lastT = performance.now();
 
   function frame(now) {
     let dt = (now - lastT) / 1000;
     lastT = now;
-    if (dt > 1 / 30) dt = 1 / 30;   // 防止切后台后跳帧
+    if (dt > 1 / 30) dt = 1 / 30;
     if (dt < 0) dt = 0;
 
     update(dt);
@@ -782,7 +1018,7 @@
     requestAnimationFrame(frame);
   }
 
-  /* ================= 启动 ================= */
+  /* ---------- 启动 ---------- */
   resize();
   reset();
   requestAnimationFrame(frame);
